@@ -142,7 +142,7 @@
             <div id="page-dashboard" class="page active">
                 <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6"></div>
                 <div id="salud-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6"></div>
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-sm font-semibold text-gray-700">Venta sobre Inventario (30 días)</h3>
@@ -154,6 +154,24 @@
                         <h3 class="text-sm font-semibold text-gray-700 mb-4">Top Productos Vendidos</h3>
                         <div id="top-productos-list" class="max-h-[280px] overflow-y-auto"></div>
                     </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">Inventario por Marca</h3>
+                        <div style="height:260px;position:relative"><canvas id="dash-pie-marca"></canvas></div>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">Inventario por Regional</h3>
+                        <div style="height:260px;position:relative"><canvas id="dash-pie-regional"></canvas></div>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">Inventario por Estado</h3>
+                        <div style="height:260px;position:relative"><canvas id="dash-pie-estado"></canvas></div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3">Inventario por Almacén</h3>
+                    <div id="dash-tabla-almacenes"></div>
                 </div>
             </div>
 
@@ -457,13 +475,20 @@ async function loadDashboard() {
         let qs = '?';
         if (r) qs += `regional=${r}&`;
         if (m) qs += `marca=${m}&`;
-        const [kpis, eficiencia, top] = await Promise.all([
-            api('/kpis' + qs), api('/ventas/eficiencia' + qs), api('/ventas/top-productos' + qs + 'limit=10')
+        const [kpis, eficiencia, top, analisis, regionales, almResumen] = await Promise.all([
+            api('/kpis' + qs), api('/ventas/eficiencia' + qs), api('/ventas/top-productos' + qs + 'limit=10'),
+            api('/analisis/inventario?tipo=Venta&' + qs.slice(1)),
+            api('/regionales'),
+            api('/almacenes/resumen?tipo=Venta&' + qs.slice(1))
         ]);
         renderKPIs(kpis);
         renderSaludCards(kpis.salud_inventario);
         renderEficienciaChart(eficiencia);
         renderTopProductos(top);
+        renderDashPieMarca(analisis);
+        renderDashPieRegional(regionales);
+        renderDashPieEstado(kpis.salud_inventario);
+        renderDashTablaAlmacenes(almResumen);
         document.getElementById('nav-count-alertas').textContent = kpis.alertas.total || '';
         document.getElementById('nav-count-traslados').textContent = kpis.traslados_pendientes || '';
     } catch (e) { console.error('Error dashboard:', e); }
@@ -650,6 +675,93 @@ function renderTopProductos(data) {
             </div>
         </div>
     `).join('');
+}
+
+// ============================================
+// DASHBOARD CHARTS (tortas + tabla almacenes)
+// ============================================
+let dashPieMarca = null, dashPieRegional = null, dashPieEstado = null;
+const PIE_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#f97316','#84cc16','#6366f1','#94a3b8'];
+
+function renderDashPieMarca(data) {
+    const m = (data.marcas || []).slice(0, 8);
+    const others = (data.marcas || []).slice(8);
+    const labels = m.map(x => x.nombre);
+    const values = m.map(x => x.valor);
+    if (others.length) { labels.push('Otras (' + others.length + ')'); values.push(others.reduce((s,x) => s + x.valor, 0)); }
+    if (dashPieMarca) dashPieMarca.destroy();
+    dashPieMarca = new Chart(document.getElementById('dash-pie-marca'), {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data: values, backgroundColor: PIE_COLORS }] },
+        options: { responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'right', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
+                tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatCurrency(ctx.raw)} (${(ctx.raw/data.total_valor*100).toFixed(1)}%)` } } } }
+    });
+}
+
+function renderDashPieRegional(resp) {
+    const data = resp.regionales || [];
+    const total = resp.inventario_total || 1;
+    const labels = data.map(r => r.nombre);
+    const values = data.map(r => r.valor_inventario);
+    if (dashPieRegional) dashPieRegional.destroy();
+    dashPieRegional = new Chart(document.getElementById('dash-pie-regional'), {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data: values, backgroundColor: PIE_COLORS }] },
+        options: { responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'right', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
+                tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatCurrency(ctx.raw)} (${(ctx.raw/total*100).toFixed(1)}%)` } } } }
+    });
+}
+
+function renderDashPieEstado(s) {
+    if (!s) return;
+    const labels = ['Sano', 'Crítico', 'Bajo', 'Sobreinventario', 'Sin Movimiento'];
+    const sinMov = s.total_valor - (s.sano.valor + s.critico.valor + s.bajo.valor + s.sobreinventario.valor);
+    const values = [s.sano.valor, s.critico.valor, s.bajo.valor, s.sobreinventario.valor, Math.max(sinMov, 0)];
+    const colors = ['#10b981', '#ef4444', '#f59e0b', '#f97316', '#94a3b8'];
+    if (dashPieEstado) dashPieEstado.destroy();
+    dashPieEstado = new Chart(document.getElementById('dash-pie-estado'), {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data: values, backgroundColor: colors }] },
+        options: { responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'right', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
+                tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatCurrency(ctx.raw)} (${(ctx.raw/s.total_valor*100).toFixed(1)}%)` } } } }
+    });
+}
+
+function renderDashTablaAlmacenes(resp) {
+    const data = resp.almacenes || [];
+    const total = resp.inventario_total || 1;
+    document.getElementById('dash-tabla-almacenes').innerHTML = !data.length
+        ? '<p class="text-gray-400 text-center py-6">Sin datos</p>'
+        : `<div class="overflow-x-auto"><table class="w-full text-xs">
+            <thead><tr class="border-b border-gray-200 bg-gray-50">
+                <th class="text-left py-2.5 px-3 font-medium text-gray-600">Almacén</th>
+                <th class="text-left py-2.5 px-3 font-medium text-gray-600">Regional</th>
+                <th class="text-right py-2.5 px-3 font-medium text-gray-600">Valor Inventario</th>
+                <th class="text-right py-2.5 px-3 font-medium text-gray-600">% Total</th>
+                <th class="text-right py-2.5 px-3 font-medium text-gray-600">Ventas 30d</th>
+                <th class="text-right py-2.5 px-3 font-medium text-gray-600">Rotación</th>
+                <th class="text-right py-2.5 px-3 font-medium text-gray-600">Alertas</th>
+            </tr></thead>
+            <tbody>${data.map(a => `
+                <tr class="border-b border-gray-50 hover:bg-gray-50">
+                    <td class="py-2 px-3"><span class="font-medium text-gray-900">${a.nombre}</span>${a.es_cedi ? ' <span class="text-[9px] bg-blue-100 text-blue-700 px-1 rounded">CEDI</span>' : ''}</td>
+                    <td class="py-2 px-3 text-gray-500">${a.regional || '-'}</td>
+                    <td class="py-2 px-3 text-right font-medium">${formatCurrency(a.valor_inventario)}</td>
+                    <td class="py-2 px-3 text-right">
+                        <div class="flex items-center justify-end gap-1">
+                            <div class="w-14 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-blue-500 rounded-full" style="width:${Math.min(a.pct_inventario,100)}%"></div></div>
+                            <span class="font-semibold w-10 text-right">${a.pct_inventario}%</span>
+                        </div>
+                    </td>
+                    <td class="py-2 px-3 text-right">${formatCurrency(a.ventas_30d_valor)}</td>
+                    <td class="py-2 px-3 text-right"><span class="font-semibold ${a.rotacion_pct > 30 ? 'text-green-600' : a.rotacion_pct > 15 ? 'text-yellow-600' : 'text-red-600'}">${a.rotacion_pct}%</span></td>
+                    <td class="py-2 px-3 text-right">${a.alertas_total} <span class="text-gray-400">(${a.stock_critico}c)</span></td>
+                </tr>
+            `).join('')}</tbody>
+        </table></div>`;
 }
 
 // ============================================
