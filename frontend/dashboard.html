@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockIQ - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .loading { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                        <i data-lucide="bar-chart-3" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-900">StockIQ</h1>
+                        <p class="text-xs text-gray-500">Gestión Inteligente de Inventario</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span id="lastUpdate" class="text-xs text-gray-500"></span>
+                    <button onclick="loadData()" class="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-2">
+                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        Actualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <!-- KPIs -->
+        <div id="kpis" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 loading">
+                <div class="h-16 bg-gray-100 rounded"></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 loading">
+                <div class="h-16 bg-gray-100 rounded"></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 loading">
+                <div class="h-16 bg-gray-100 rounded"></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 loading">
+                <div class="h-16 bg-gray-100 rounded"></div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="border-b border-gray-200">
+                <nav class="flex">
+                    <button onclick="showTab('alertas')" id="tab-alertas" class="flex items-center gap-2 px-6 py-4 text-sm font-medium border-b-2 border-blue-600 text-blue-600">
+                        <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+                        Alertas
+                        <span id="count-alertas" class="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-600">0</span>
+                    </button>
+                    <button onclick="showTab('traslados')" id="tab-traslados" class="flex items-center gap-2 px-6 py-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                        <i data-lucide="truck" class="w-4 h-4"></i>
+                        Traslados
+                        <span id="count-traslados" class="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">0</span>
+                    </button>
+                    <button onclick="showTab('almacenes')" id="tab-almacenes" class="flex items-center gap-2 px-6 py-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                        <i data-lucide="warehouse" class="w-4 h-4"></i>
+                        Almacenes
+                        <span id="count-almacenes" class="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">0</span>
+                    </button>
+                </nav>
+            </div>
+
+            <div class="p-6">
+                <div id="content-alertas"></div>
+                <div id="content-traslados" class="hidden"></div>
+                <div id="content-almacenes" class="hidden"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API_URL = 'http://localhost:5001/api';
+        let currentTab = 'alertas';
+
+        // Formatear moneda
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('es-CO', {
+                style: 'currency',
+                currency: 'COP',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            }).format(value);
+        }
+
+        // Formatear número
+        function formatNumber(value) {
+            return new Intl.NumberFormat('es-CO').format(Math.round(value));
+        }
+
+        // Renderizar KPIs
+        function renderKPIs(kpis) {
+            document.getElementById('kpis').innerHTML = `
+                <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500 font-medium">Valor Inventario</p>
+                            <p class="text-2xl font-bold mt-1 text-green-600">${formatCurrency(kpis.inventario.valor_inventario)}</p>
+                            <p class="text-xs text-gray-400 mt-1">${formatNumber(kpis.inventario.total_productos)} productos</p>
+                        </div>
+                        <div class="p-3 rounded-lg bg-green-50">
+                            <i data-lucide="dollar-sign" class="w-6 h-6 text-green-600"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500 font-medium">Ventas (30 días)</p>
+                            <p class="text-2xl font-bold mt-1 text-blue-600">${formatCurrency(kpis.ventas_30d.valor)}</p>
+                            <p class="text-xs text-gray-400 mt-1">${formatNumber(kpis.ventas_30d.transacciones)} transacciones</p>
+                        </div>
+                        <div class="p-3 rounded-lg bg-blue-50">
+                            <i data-lucide="trending-up" class="w-6 h-6 text-blue-600"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500 font-medium">Alertas Activas</p>
+                            <p class="text-2xl font-bold mt-1 ${kpis.alertas.criticas > 0 ? 'text-red-600' : 'text-yellow-600'}">${kpis.alertas.total}</p>
+                            <p class="text-xs text-gray-400 mt-1">${kpis.alertas.criticas} críticas</p>
+                        </div>
+                        <div class="p-3 rounded-lg ${kpis.alertas.criticas > 0 ? 'bg-red-50' : 'bg-yellow-50'}">
+                            <i data-lucide="alert-triangle" class="w-6 h-6 ${kpis.alertas.criticas > 0 ? 'text-red-600' : 'text-yellow-600'}"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500 font-medium">Traslados Sugeridos</p>
+                            <p class="text-2xl font-bold mt-1 text-purple-600">${kpis.traslados_pendientes}</p>
+                            <p class="text-xs text-gray-400 mt-1">Pendientes de ejecutar</p>
+                        </div>
+                        <div class="p-3 rounded-lg bg-purple-50">
+                            <i data-lucide="truck" class="w-6 h-6 text-purple-600"></i>
+                        </div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        // Renderizar Alertas
+        function renderAlertas(alertas) {
+            const nivelColors = {
+                'CRITICO': 'border-red-500 bg-red-50',
+                'ALTO': 'border-orange-500 bg-orange-50',
+                'MEDIO': 'border-yellow-500 bg-yellow-50',
+                'BAJO': 'border-blue-500 bg-blue-50'
+            };
+            const nivelBadge = {
+                'CRITICO': 'bg-red-500 text-white',
+                'ALTO': 'bg-orange-500 text-white',
+                'MEDIO': 'bg-yellow-500 text-white',
+                'BAJO': 'bg-blue-500 text-white'
+            };
+
+            if (alertas.length === 0) {
+                document.getElementById('content-alertas').innerHTML = '<p class="text-center text-gray-500 py-8">No hay alertas pendientes</p>';
+                return;
+            }
+
+            document.getElementById('content-alertas').innerHTML = alertas.map(a => `
+                <div class="p-4 rounded-lg border-l-4 ${nivelColors[a.nivel]} mb-3">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded text-xs font-medium ${nivelBadge[a.nivel]}">${a.nivel}</span>
+                                <span class="text-xs text-gray-500">${a.tipo_alerta}</span>
+                            </div>
+                            <p class="font-medium text-gray-900 mt-1 text-sm">${(a.producto_nombre || a.referencia).substring(0, 60)}</p>
+                            <p class="text-xs text-gray-600 mt-1">
+                                📍 ${a.almacen_nombre || a.bodega_codigo} • 
+                                Stock: ${Math.round(a.stock_actual)} • 
+                                ${a.dias_inventario < 9999 ? a.dias_inventario.toFixed(1) + ' días' : 'Sin venta'}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('count-alertas').textContent = alertas.length;
+        }
+
+        // Renderizar Traslados
+        function renderTraslados(traslados) {
+            if (traslados.length === 0) {
+                document.getElementById('content-traslados').innerHTML = '<p class="text-center text-gray-500 py-8">No hay traslados sugeridos</p>';
+                return;
+            }
+
+            const prioridadColors = {
+                'URGENTE': 'bg-red-100 text-red-700',
+                'ALTA': 'bg-orange-100 text-orange-700',
+                'MEDIA': 'bg-yellow-100 text-yellow-700',
+                'BAJA': 'bg-gray-100 text-gray-700'
+            };
+
+            document.getElementById('content-traslados').innerHTML = traslados.map(t => `
+                <div class="p-4 bg-white rounded-lg border border-gray-200 hover:shadow-md transition-shadow mb-3">
+                    <div class="flex items-center gap-3">
+                        <div class="flex-1">
+                            <p class="font-medium text-gray-900 text-sm">${(t.producto_nombre || t.referencia).substring(0, 50)}</p>
+                            <div class="flex items-center gap-2 mt-2 text-sm">
+                                <span class="text-gray-600">${t.origen_nombre || t.bodega_origen}</span>
+                                <span class="text-blue-500">→</span>
+                                <span class="font-medium text-blue-600">${t.destino_nombre || t.bodega_destino}</span>
+                            </div>
+                            <div class="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                                <span>Cantidad: <strong>${Math.round(t.cantidad_sugerida)}</strong></span>
+                                <span>Origen: ${Math.round(t.dias_inv_origen)}d</span>
+                                <span>Destino: ${t.dias_inv_destino.toFixed(1)}d</span>
+                            </div>
+                        </div>
+                        <span class="px-2 py-1 rounded text-xs font-medium ${prioridadColors[t.prioridad]}">${t.prioridad}</span>
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('count-traslados').textContent = traslados.length;
+        }
+
+        // Renderizar Almacenes
+        function renderAlmacenes(almacenes) {
+            document.getElementById('content-almacenes').innerHTML = `
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b border-gray-200">
+                                <th class="text-left py-3 px-4 font-medium text-gray-600">Almacén</th>
+                                <th class="text-left py-3 px-4 font-medium text-gray-600">Regional</th>
+                                <th class="text-right py-3 px-4 font-medium text-gray-600">Productos</th>
+                                <th class="text-right py-3 px-4 font-medium text-gray-600">Unidades</th>
+                                <th class="text-right py-3 px-4 font-medium text-gray-600">Valor</th>
+                                <th class="text-right py-3 px-4 font-medium text-gray-600">Días Inv.</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${almacenes.map(a => `
+                                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                                    <td class="py-3 px-4">
+                                        <div class="font-medium text-gray-900">${a.nombre}</div>
+                                        <div class="text-xs text-gray-500">${a.codigo}</div>
+                                    </td>
+                                    <td class="py-3 px-4 text-gray-600">${a.regional || '-'}</td>
+                                    <td class="py-3 px-4 text-right text-gray-900">${formatNumber(a.productos)}</td>
+                                    <td class="py-3 px-4 text-right text-gray-900">${formatNumber(a.unidades)}</td>
+                                    <td class="py-3 px-4 text-right text-gray-900">${formatCurrency(a.valor_inventario)}</td>
+                                    <td class="py-3 px-4 text-right">
+                                        <span class="px-2 py-1 rounded text-xs font-medium ${
+                                            a.dias_inv_promedio < 15 ? 'bg-red-100 text-red-700' :
+                                            a.dias_inv_promedio < 30 ? 'bg-yellow-100 text-yellow-700' :
+                                            'bg-green-100 text-green-700'
+                                        }">${a.dias_inv_promedio ? Math.round(a.dias_inv_promedio) : '-'}</span>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            document.getElementById('count-almacenes').textContent = almacenes.length;
+        }
+
+        // Cambiar tab
+        function showTab(tab) {
+            currentTab = tab;
+            
+            // Ocultar todos los contenidos
+            document.getElementById('content-alertas').classList.add('hidden');
+            document.getElementById('content-traslados').classList.add('hidden');
+            document.getElementById('content-almacenes').classList.add('hidden');
+            
+            // Mostrar el contenido seleccionado
+            document.getElementById('content-' + tab).classList.remove('hidden');
+            
+            // Actualizar estilos de tabs
+            ['alertas', 'traslados', 'almacenes'].forEach(t => {
+                const tabEl = document.getElementById('tab-' + t);
+                if (t === tab) {
+                    tabEl.classList.remove('border-transparent', 'text-gray-500');
+                    tabEl.classList.add('border-blue-600', 'text-blue-600');
+                } else {
+                    tabEl.classList.add('border-transparent', 'text-gray-500');
+                    tabEl.classList.remove('border-blue-600', 'text-blue-600');
+                }
+            });
+        }
+
+        // Cargar datos
+        async function loadData() {
+            try {
+                const [kpis, alertas, traslados, almacenes] = await Promise.all([
+                    fetch(API_URL + '/kpis').then(r => r.json()),
+                    fetch(API_URL + '/alertas?limit=30').then(r => r.json()),
+                    fetch(API_URL + '/traslados?limit=30').then(r => r.json()),
+                    fetch(API_URL + '/almacenes').then(r => r.json())
+                ]);
+
+                renderKPIs(kpis);
+                renderAlertas(alertas);
+                renderTraslados(traslados);
+                renderAlmacenes(almacenes);
+                
+                document.getElementById('lastUpdate').textContent = 'Actualizado: ' + new Date().toLocaleTimeString();
+                
+                lucide.createIcons();
+            } catch (err) {
+                console.error('Error cargando datos:', err);
+                alert('Error conectando con la API. Verifica que esté corriendo en http://localhost:5001');
+            }
+        }
+
+        // Inicializar
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            loadData();
+            // Refrescar cada 60 segundos
+            setInterval(loadData, 60000);
+        });
+    </script>
+</body>
+</html>
