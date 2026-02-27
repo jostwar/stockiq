@@ -3,339 +3,869 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StockIQ - Dashboard</title>
+    <title>StockIQ - Gestión Inteligente de Inventario</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <style>
-        .loading { animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .loading{animation:pulse 2s infinite}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+        .sidebar-item.active{background:rgba(59,130,246,.15);color:#3b82f6;border-right:3px solid #3b82f6}
+        .sidebar-item:hover{background:rgba(255,255,255,.05)}
+        .page{display:none}.page.active{display:block}
+        .badge-critico{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+        .badge-alto{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}
+        .badge-medio{background:#fefce8;color:#ca8a04;border:1px solid #fef08a}
+        .badge-bajo{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}
+        .badge-urgente{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+        .badge-alta{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}
+        .badge-media{background:#fefce8;color:#ca8a04;border:1px solid #fef08a}
+        .badge-baja{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0}
+        select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b7280' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;padding-right:28px;-webkit-appearance:none;appearance:none}
+        .modal-overlay{background:rgba(0,0,0,.5);backdrop-filter:blur(4px)}
+        body{overflow:hidden}
+        #main-content{overflow-y:auto}
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <!-- Header -->
-    <header class="bg-white shadow-sm border-b border-gray-200">
-        <div class="max-w-7xl mx-auto px-4 py-4">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-                        <i data-lucide="bar-chart-3" class="w-6 h-6 text-white"></i>
+<body class="bg-gray-50 h-screen flex">
+
+<!-- ============ LOGIN ============ -->
+<div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-800">
+    <div class="w-full max-w-md px-8">
+        <div class="text-center mb-8">
+            <div class="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-600/30">
+                <i data-lucide="bar-chart-3" class="w-8 h-8 text-white"></i>
+            </div>
+            <h1 class="text-3xl font-bold text-white">StockIQ</h1>
+            <p class="text-blue-300 mt-1">Gestión Inteligente de Inventario</p>
+        </div>
+        <div class="bg-white/10 backdrop-blur rounded-2xl p-8 border border-white/20">
+            <div id="login-error" class="hidden mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-red-200 text-sm"></div>
+            <div class="mb-4">
+                <label class="block text-blue-200 text-sm mb-2">Usuario</label>
+                <input id="login-user" type="text" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-blue-300/50 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400" placeholder="usuario">
+            </div>
+            <div class="mb-6">
+                <label class="block text-blue-200 text-sm mb-2">Contraseña</label>
+                <input id="login-pass" type="password" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-blue-300/50 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400" placeholder="••••••••">
+            </div>
+            <button onclick="doLogin()" id="login-btn" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+                Ingresar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ============ APP SHELL ============ -->
+<div id="app" class="hidden w-full h-screen flex">
+    <!-- Sidebar -->
+    <aside class="w-60 bg-slate-900 flex flex-col flex-shrink-0 h-screen">
+        <div class="px-5 py-5 flex items-center gap-3 border-b border-slate-700/50">
+            <div class="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center">
+                <i data-lucide="bar-chart-3" class="w-5 h-5 text-white"></i>
+            </div>
+            <div>
+                <h1 class="text-white font-bold text-lg leading-none">StockIQ</h1>
+                <p class="text-slate-400 text-[10px]">Inventario Inteligente</p>
+            </div>
+        </div>
+        <nav class="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
+            <a onclick="showPage('dashboard')" class="sidebar-item active flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="dashboard">
+                <i data-lucide="layout-dashboard" class="w-4 h-4"></i>Dashboard
+            </a>
+            <a onclick="showPage('alertas')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="alertas">
+                <i data-lucide="alert-triangle" class="w-4 h-4"></i>Alertas
+                <span id="nav-count-alertas" class="ml-auto px-1.5 py-0.5 rounded text-[10px] bg-red-500/20 text-red-400"></span>
+            </a>
+            <a onclick="showPage('traslados')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="traslados">
+                <i data-lucide="truck" class="w-4 h-4"></i>Traslados
+                <span id="nav-count-traslados" class="ml-auto px-1.5 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400"></span>
+            </a>
+            <a onclick="showPage('compras')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="compras">
+                <i data-lucide="shopping-cart" class="w-4 h-4"></i>Compras
+            </a>
+            <a onclick="showPage('almacenes')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="almacenes">
+                <i data-lucide="warehouse" class="w-4 h-4"></i>Almacenes
+            </a>
+            <a onclick="showPage('productos')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="productos">
+                <i data-lucide="search" class="w-4 h-4"></i>Productos
+            </a>
+            <a onclick="showPage('regionales')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="regionales">
+                <i data-lucide="map-pin" class="w-4 h-4"></i>Regionales
+            </a>
+        </nav>
+        <div class="px-3 py-4 border-t border-slate-700/50">
+            <div class="flex items-center gap-3 px-3">
+                <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold" id="user-avatar">A</div>
+                <div class="flex-1 min-w-0">
+                    <p id="user-name" class="text-sm text-white truncate">Admin</p>
+                    <p id="user-role" class="text-[10px] text-slate-400">admin</p>
+                </div>
+                <button onclick="doLogout()" class="text-slate-400 hover:text-red-400 transition-colors" title="Cerrar sesión">
+                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="flex-1 flex flex-col h-screen overflow-hidden">
+        <!-- Top Bar -->
+        <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
+            <div class="flex items-center gap-4">
+                <h2 id="page-title" class="text-lg font-semibold text-gray-800">Dashboard</h2>
+                <select id="global-regional" onchange="onRegionalChange()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400">
+                    <option value="">Todas las regionales</option>
+                </select>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="last-update" class="text-xs text-gray-400"></span>
+                <button onclick="refreshCurrentPage()" class="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Actualizar">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Page Content -->
+        <div id="main-content" class="flex-1 overflow-y-auto p-6">
+
+            <!-- ===== DASHBOARD ===== -->
+            <div id="page-dashboard" class="page active">
+                <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6"></div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-4">Tendencia de Ventas (30 días)</h3>
+                        <canvas id="chart-ventas" height="200"></canvas>
                     </div>
-                    <div>
-                        <h1 class="text-xl font-bold text-gray-900">StockIQ</h1>
-                        <p class="text-xs text-gray-500">Gestión Inteligente de Inventario</p>
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-4">Top Productos Vendidos</h3>
+                        <div id="top-productos-list"></div>
                     </div>
                 </div>
-                <div class="flex items-center gap-4">
-                    <span id="lastUpdate" class="text-xs text-gray-500"></span>
-                    <button onclick="loadData()" class="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-2">
-                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-                        Actualizar
-                    </button>
+            </div>
+
+            <!-- ===== ALERTAS ===== -->
+            <div id="page-alertas" class="page">
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <select id="filtro-alerta-tipo" onchange="loadAlertas()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="">Todos los tipos</option>
+                        <option value="STOCK_CRITICO">Stock Crítico</option>
+                        <option value="STOCK_BAJO">Stock Bajo</option>
+                        <option value="SOBREINVENTARIO">Sobreinventario</option>
+                        <option value="BAJA_ROTACION">Baja Rotación</option>
+                    </select>
+                    <select id="filtro-alerta-nivel" onchange="loadAlertas()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="">Todos los niveles</option>
+                        <option value="CRITICO">Crítico</option>
+                        <option value="ALTO">Alto</option>
+                        <option value="MEDIO">Medio</option>
+                        <option value="BAJO">Bajo</option>
+                    </select>
+                    <select id="filtro-alerta-estado" onchange="loadAlertas()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="PENDIENTE">Pendientes</option>
+                        <option value="ATENDIDA">Atendidas</option>
+                        <option value="IGNORADA">Ignoradas</option>
+                        <option value="">Todas</option>
+                    </select>
+                    <div class="ml-auto">
+                        <button onclick="exportData('alertas')" class="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
+                            <i data-lucide="download" class="w-3.5 h-3.5"></i>Exportar CSV
+                        </button>
+                    </div>
                 </div>
+                <div id="alertas-content" class="space-y-2"></div>
+            </div>
+
+            <!-- ===== TRASLADOS ===== -->
+            <div id="page-traslados" class="page">
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <select id="filtro-traslado-prioridad" onchange="loadTraslados()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="">Todas las prioridades</option>
+                        <option value="URGENTE">Urgente</option>
+                        <option value="ALTA">Alta</option>
+                        <option value="MEDIA">Media</option>
+                        <option value="BAJA">Baja</option>
+                    </select>
+                    <select id="filtro-traslado-estado" onchange="loadTraslados()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="PENDIENTE">Pendientes</option>
+                        <option value="APROBADO">Aprobados</option>
+                        <option value="EJECUTADO">Ejecutados</option>
+                        <option value="">Todos</option>
+                    </select>
+                    <div class="ml-auto">
+                        <button onclick="exportData('traslados')" class="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
+                            <i data-lucide="download" class="w-3.5 h-3.5"></i>Exportar CSV
+                        </button>
+                    </div>
+                </div>
+                <div id="traslados-content" class="space-y-2"></div>
+            </div>
+
+            <!-- ===== COMPRAS ===== -->
+            <div id="page-compras" class="page">
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <select id="filtro-compra-prioridad" onchange="loadCompras()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="">Todas las prioridades</option>
+                        <option value="URGENTE">Urgente</option>
+                        <option value="ALTA">Alta</option>
+                        <option value="MEDIA">Media</option>
+                        <option value="BAJA">Baja</option>
+                    </select>
+                    <select id="filtro-compra-marca" onchange="loadCompras()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="">Todas las marcas</option>
+                    </select>
+                    <div class="ml-auto">
+                        <button onclick="exportData('compras')" class="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
+                            <i data-lucide="download" class="w-3.5 h-3.5"></i>Exportar CSV
+                        </button>
+                    </div>
+                </div>
+                <div id="compras-content"></div>
+            </div>
+
+            <!-- ===== ALMACENES ===== -->
+            <div id="page-almacenes" class="page">
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <select id="filtro-almacen-tipo" onchange="loadAlmacenes()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="Venta">Venta</option>
+                        <option value="Reserva">Reserva</option>
+                        <option value="Laboratorio">Laboratorio</option>
+                        <option value="Show Room">Show Room</option>
+                        <option value="">Todos los tipos</option>
+                    </select>
+                    <div class="ml-auto">
+                        <button onclick="exportData('almacenes')" class="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
+                            <i data-lucide="download" class="w-3.5 h-3.5"></i>Exportar CSV
+                        </button>
+                    </div>
+                </div>
+                <div id="almacenes-content"></div>
+            </div>
+
+            <!-- ===== PRODUCTOS ===== -->
+            <div id="page-productos" class="page">
+                <div class="mb-4">
+                    <div class="relative max-w-lg">
+                        <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+                        <input id="producto-search" type="text" placeholder="Buscar por nombre, referencia o código..."
+                            class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                            oninput="debounceSearch()">
+                    </div>
+                </div>
+                <div id="productos-results"></div>
+                <div id="producto-detalle" class="hidden mt-6"></div>
+            </div>
+
+            <!-- ===== REGIONALES ===== -->
+            <div id="page-regionales" class="page">
+                <div id="regionales-content" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
             </div>
         </div>
-    </header>
+    </div>
+</div>
 
-    <main class="max-w-7xl mx-auto px-4 py-6">
-        <!-- KPIs -->
-        <div id="kpis" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 loading">
-                <div class="h-16 bg-gray-100 rounded"></div>
-            </div>
-            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 loading">
-                <div class="h-16 bg-gray-100 rounded"></div>
-            </div>
-            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 loading">
-                <div class="h-16 bg-gray-100 rounded"></div>
-            </div>
-            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 loading">
-                <div class="h-16 bg-gray-100 rounded"></div>
-            </div>
+<!-- ============ MODAL PRODUCTO ============ -->
+<div id="modal-producto" class="hidden fixed inset-0 z-40 modal-overlay flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+            <h3 id="modal-title" class="font-semibold text-gray-800">Detalle de Producto</h3>
+            <button onclick="closeModal()" class="p-1 hover:bg-gray-100 rounded-lg"><i data-lucide="x" class="w-5 h-5 text-gray-400"></i></button>
         </div>
+        <div id="modal-body" class="p-6"></div>
+    </div>
+</div>
 
-        <!-- Tabs -->
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div class="border-b border-gray-200">
-                <nav class="flex">
-                    <button onclick="showTab('alertas')" id="tab-alertas" class="flex items-center gap-2 px-6 py-4 text-sm font-medium border-b-2 border-blue-600 text-blue-600">
-                        <i data-lucide="alert-triangle" class="w-4 h-4"></i>
-                        Alertas
-                        <span id="count-alertas" class="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-600">0</span>
-                    </button>
-                    <button onclick="showTab('traslados')" id="tab-traslados" class="flex items-center gap-2 px-6 py-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700">
-                        <i data-lucide="truck" class="w-4 h-4"></i>
-                        Traslados
-                        <span id="count-traslados" class="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">0</span>
-                    </button>
-                    <button onclick="showTab('almacenes')" id="tab-almacenes" class="flex items-center gap-2 px-6 py-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700">
-                        <i data-lucide="warehouse" class="w-4 h-4"></i>
-                        Almacenes
-                        <span id="count-almacenes" class="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">0</span>
-                    </button>
-                </nav>
-            </div>
-
-            <div class="p-6">
-                <div id="content-alertas"></div>
-                <div id="content-traslados" class="hidden"></div>
-                <div id="content-almacenes" class="hidden"></div>
-            </div>
-        </div>
-    </main>
-
-    <script>
+<script>
+// ============================================
+// CONFIG & STATE
+// ============================================
 const API_URL = 'https://tls8rexfqb.execute-api.us-east-1.amazonaws.com/prod/api';
-        let currentTab = 'alertas';
+let token = localStorage.getItem('stockiq_token');
+let currentUser = null;
+let currentPage = 'dashboard';
+let filtros = {};
+let salesChart = null;
+let searchTimer = null;
 
-        // Formatear moneda
-        function formatCurrency(value) {
-            return new Intl.NumberFormat('es-CO', {
-                style: 'currency',
-                currency: 'COP',
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0
-            }).format(value);
-        }
+// ============================================
+// API HELPERS
+// ============================================
+async function api(path, opts = {}) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(API_URL + path, { ...opts, headers });
+    if (res.status === 401) { doLogout(); throw new Error('Sesión expirada'); }
+    const data = await res.json();
+    if (res.status >= 400) throw new Error(data.error || 'Error en la API');
+    return data;
+}
 
-        // Formatear número
-        function formatNumber(value) {
-            return new Intl.NumberFormat('es-CO').format(Math.round(value));
-        }
+function formatCurrency(v) {
+    return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
+}
+function formatNumber(v) { return new Intl.NumberFormat('es-CO').format(Math.round(v)); }
+function badge(text, type) {
+    const cls = type ? `badge-${type.toLowerCase()}` : 'bg-gray-100 text-gray-600';
+    return `<span class="px-2 py-0.5 rounded text-xs font-medium ${cls}">${text}</span>`;
+}
+function truncate(s, n = 55) { return s && s.length > n ? s.substring(0, n) + '...' : (s || ''); }
 
-        // Renderizar KPIs
-        function renderKPIs(kpis) {
-            document.getElementById('kpis').innerHTML = `
-                <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500 font-medium">Valor Inventario</p>
-                            <p class="text-2xl font-bold mt-1 text-green-600">${formatCurrency(kpis.inventario.valor_inventario)}</p>
-                            <p class="text-xs text-gray-400 mt-1">${formatNumber(kpis.inventario.total_productos)} productos</p>
-                        </div>
-                        <div class="p-3 rounded-lg bg-green-50">
-                            <i data-lucide="dollar-sign" class="w-6 h-6 text-green-600"></i>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500 font-medium">Ventas (30 días)</p>
-                            <p class="text-2xl font-bold mt-1 text-blue-600">${formatCurrency(kpis.ventas_30d.valor)}</p>
-                            <p class="text-xs text-gray-400 mt-1">${formatNumber(kpis.ventas_30d.transacciones)} transacciones</p>
-                        </div>
-                        <div class="p-3 rounded-lg bg-blue-50">
-                            <i data-lucide="trending-up" class="w-6 h-6 text-blue-600"></i>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500 font-medium">Alertas Activas</p>
-                            <p class="text-2xl font-bold mt-1 ${kpis.alertas.criticas > 0 ? 'text-red-600' : 'text-yellow-600'}">${kpis.alertas.total}</p>
-                            <p class="text-xs text-gray-400 mt-1">${kpis.alertas.criticas} críticas</p>
-                        </div>
-                        <div class="p-3 rounded-lg ${kpis.alertas.criticas > 0 ? 'bg-red-50' : 'bg-yellow-50'}">
-                            <i data-lucide="alert-triangle" class="w-6 h-6 ${kpis.alertas.criticas > 0 ? 'text-red-600' : 'text-yellow-600'}"></i>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-500 font-medium">Traslados Sugeridos</p>
-                            <p class="text-2xl font-bold mt-1 text-purple-600">${kpis.traslados_pendientes}</p>
-                            <p class="text-xs text-gray-400 mt-1">Pendientes de ejecutar</p>
-                        </div>
-                        <div class="p-3 rounded-lg bg-purple-50">
-                            <i data-lucide="truck" class="w-6 h-6 text-purple-600"></i>
-                        </div>
-                    </div>
-                </div>
-            `;
-            lucide.createIcons();
-        }
+// ============================================
+// AUTH
+// ============================================
+async function doLogin() {
+    const u = document.getElementById('login-user').value;
+    const p = document.getElementById('login-pass').value;
+    const errEl = document.getElementById('login-error');
+    errEl.classList.add('hidden');
+    try {
+        const data = await fetch(API_URL + '/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: u, password: p })
+        }).then(r => r.json());
+        if (data.error) { errEl.textContent = data.error; errEl.classList.remove('hidden'); return; }
+        token = data.token;
+        currentUser = data.user;
+        localStorage.setItem('stockiq_token', token);
+        showApp();
+    } catch (e) { errEl.textContent = 'Error de conexión'; errEl.classList.remove('hidden'); }
+}
 
-        // Renderizar Alertas
-        function renderAlertas(alertas) {
-            const nivelColors = {
-                'CRITICO': 'border-red-500 bg-red-50',
-                'ALTO': 'border-orange-500 bg-orange-50',
-                'MEDIO': 'border-yellow-500 bg-yellow-50',
-                'BAJO': 'border-blue-500 bg-blue-50'
-            };
-            const nivelBadge = {
-                'CRITICO': 'bg-red-500 text-white',
-                'ALTO': 'bg-orange-500 text-white',
-                'MEDIO': 'bg-yellow-500 text-white',
-                'BAJO': 'bg-blue-500 text-white'
-            };
+function doLogout() {
+    if (token) api('/auth/logout', { method: 'POST' }).catch(() => {});
+    token = null; currentUser = null;
+    localStorage.removeItem('stockiq_token');
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('login-screen').classList.remove('hidden');
+    document.getElementById('login-user').value = '';
+    document.getElementById('login-pass').value = '';
+}
 
-            if (alertas.length === 0) {
-                document.getElementById('content-alertas').innerHTML = '<p class="text-center text-gray-500 py-8">No hay alertas pendientes</p>';
-                return;
+async function checkAuth() {
+    if (!token) return false;
+    try {
+        currentUser = await api('/auth/me');
+        return true;
+    } catch { token = null; localStorage.removeItem('stockiq_token'); return false; }
+}
+
+function showApp() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    if (currentUser) {
+        document.getElementById('user-name').textContent = currentUser.nombre || currentUser.username;
+        document.getElementById('user-role').textContent = currentUser.rol;
+        document.getElementById('user-avatar').textContent = (currentUser.nombre || currentUser.username)[0].toUpperCase();
+    }
+    initApp();
+}
+
+// ============================================
+// NAVIGATION
+// ============================================
+function showPage(page) {
+    currentPage = page;
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + page).classList.add('active');
+    document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
+    document.querySelector(`.sidebar-item[data-page="${page}"]`).classList.add('active');
+    const titles = { dashboard: 'Dashboard', alertas: 'Alertas', traslados: 'Traslados', compras: 'Compras Sugeridas', almacenes: 'Almacenes', productos: 'Búsqueda de Productos', regionales: 'Regionales' };
+    document.getElementById('page-title').textContent = titles[page] || page;
+    refreshCurrentPage();
+    lucide.createIcons();
+}
+
+function refreshCurrentPage() {
+    const loaders = {
+        dashboard: loadDashboard, alertas: loadAlertas, traslados: loadTraslados,
+        compras: loadCompras, almacenes: loadAlmacenes, productos: () => {}, regionales: loadRegionales
+    };
+    if (loaders[currentPage]) loaders[currentPage]();
+    document.getElementById('last-update').textContent = 'Actualizado: ' + new Date().toLocaleTimeString('es-CO');
+}
+
+function onRegionalChange() { refreshCurrentPage(); }
+function getRegional() { return document.getElementById('global-regional').value; }
+
+// ============================================
+// DASHBOARD
+// ============================================
+async function loadDashboard() {
+    try {
+        const r = getRegional();
+        const qs = r ? `?regional=${r}` : '';
+        const [kpis, ventas, top] = await Promise.all([
+            api('/kpis' + qs), api('/ventas/diarias' + qs), api('/ventas/top-productos' + qs + (qs ? '&' : '?') + 'limit=10')
+        ]);
+        renderKPIs(kpis);
+        renderSalesChart(ventas);
+        renderTopProductos(top);
+        document.getElementById('nav-count-alertas').textContent = kpis.alertas.total || '';
+        document.getElementById('nav-count-traslados').textContent = kpis.traslados_pendientes || '';
+    } catch (e) { console.error('Error dashboard:', e); }
+}
+
+function renderKPIs(k) {
+    document.getElementById('kpi-cards').innerHTML = `
+        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+            <div class="flex items-center justify-between">
+                <div><p class="text-xs text-gray-500 font-medium">Valor Inventario</p>
+                    <p class="text-xl font-bold mt-1 text-emerald-600">${formatCurrency(k.inventario.valor_inventario)}</p>
+                    <p class="text-[11px] text-gray-400 mt-0.5">${formatNumber(k.inventario.total_productos)} productos en ${k.inventario.total_almacenes} almacenes</p></div>
+                <div class="p-2.5 rounded-lg bg-emerald-50"><i data-lucide="dollar-sign" class="w-5 h-5 text-emerald-600"></i></div>
+            </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+            <div class="flex items-center justify-between">
+                <div><p class="text-xs text-gray-500 font-medium">Ventas (30 días)</p>
+                    <p class="text-xl font-bold mt-1 text-blue-600">${formatCurrency(k.ventas_30d.valor)}</p>
+                    <p class="text-[11px] text-gray-400 mt-0.5">${formatNumber(k.ventas_30d.transacciones)} transacciones</p></div>
+                <div class="p-2.5 rounded-lg bg-blue-50"><i data-lucide="trending-up" class="w-5 h-5 text-blue-600"></i></div>
+            </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+            <div class="flex items-center justify-between">
+                <div><p class="text-xs text-gray-500 font-medium">Alertas Activas</p>
+                    <p class="text-xl font-bold mt-1 ${k.alertas.criticas > 0 ? 'text-red-600' : 'text-yellow-600'}">${k.alertas.total}</p>
+                    <p class="text-[11px] text-gray-400 mt-0.5">${k.alertas.criticas} críticas · ${k.alertas.bajas} bajas</p></div>
+                <div class="p-2.5 rounded-lg ${k.alertas.criticas > 0 ? 'bg-red-50' : 'bg-yellow-50'}"><i data-lucide="alert-triangle" class="w-5 h-5 ${k.alertas.criticas > 0 ? 'text-red-600' : 'text-yellow-600'}"></i></div>
+            </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+            <div class="flex items-center justify-between">
+                <div><p class="text-xs text-gray-500 font-medium">Traslados Pendientes</p>
+                    <p class="text-xl font-bold mt-1 text-purple-600">${k.traslados_pendientes}</p>
+                    <p class="text-[11px] text-gray-400 mt-0.5">Por ejecutar</p></div>
+                <div class="p-2.5 rounded-lg bg-purple-50"><i data-lucide="truck" class="w-5 h-5 text-purple-600"></i></div>
+            </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+            <div class="flex items-center justify-between">
+                <div><p class="text-xs text-gray-500 font-medium">Compras Sugeridas</p>
+                    <p class="text-xl font-bold mt-1 text-orange-600">${k.compras.total}</p>
+                    <p class="text-[11px] text-gray-400 mt-0.5">${formatCurrency(k.compras.valor_estimado)}</p></div>
+                <div class="p-2.5 rounded-lg bg-orange-50"><i data-lucide="shopping-cart" class="w-5 h-5 text-orange-600"></i></div>
+            </div>
+        </div>`;
+    lucide.createIcons();
+}
+
+function renderSalesChart(data) {
+    const ctx = document.getElementById('chart-ventas');
+    if (salesChart) salesChart.destroy();
+    salesChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(d => { const dt = new Date(d.fecha + 'T12:00:00'); return dt.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }); }),
+            datasets: [{
+                label: 'Valor ventas',
+                data: data.map(d => d.valor),
+                borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,.08)',
+                fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { ticks: { callback: v => formatCurrency(v) }, grid: { color: '#f3f4f6' } },
+                x: { grid: { display: false }, ticks: { maxTicksLimit: 10 } }
             }
-
-            document.getElementById('content-alertas').innerHTML = alertas.map(a => `
-                <div class="p-4 rounded-lg border-l-4 ${nivelColors[a.nivel]} mb-3">
-                    <div class="flex items-start justify-between">
-                        <div class="flex-1">
-                            <div class="flex items-center gap-2">
-                                <span class="px-2 py-0.5 rounded text-xs font-medium ${nivelBadge[a.nivel]}">${a.nivel}</span>
-                                <span class="text-xs text-gray-500">${a.tipo_alerta}</span>
-                            </div>
-                            <p class="font-medium text-gray-900 mt-1 text-sm">${(a.producto_nombre || a.referencia).substring(0, 60)}</p>
-                            <p class="text-xs text-gray-600 mt-1">
-                                📍 ${a.almacen_nombre || a.bodega_codigo} • 
-                                Stock: ${Math.round(a.stock_actual)} • 
-                                ${a.dias_inventario < 9999 ? a.dias_inventario.toFixed(1) + ' días' : 'Sin venta'}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-            
-            document.getElementById('count-alertas').textContent = alertas.length;
         }
+    });
+}
 
-        // Renderizar Traslados
-        function renderTraslados(traslados) {
-            if (traslados.length === 0) {
-                document.getElementById('content-traslados').innerHTML = '<p class="text-center text-gray-500 py-8">No hay traslados sugeridos</p>';
-                return;
-            }
+function renderTopProductos(data) {
+    if (!data.length) { document.getElementById('top-productos-list').innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Sin datos</p>'; return; }
+    document.getElementById('top-productos-list').innerHTML = data.map((p, i) => `
+        <div class="flex items-center gap-3 py-2 ${i > 0 ? 'border-t border-gray-50' : ''}">
+            <span class="w-6 h-6 rounded-full ${i < 3 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'} flex items-center justify-center text-xs font-bold">${i+1}</span>
+            <div class="flex-1 min-w-0">
+                <p class="text-sm text-gray-800 truncate">${truncate(p.producto_nombre || p.referencia, 40)}</p>
+                <p class="text-[11px] text-gray-400">${p.almacenes_venta} almacenes</p>
+            </div>
+            <div class="text-right">
+                <p class="text-sm font-semibold text-gray-800">${formatNumber(p.unidades_vendidas)} uds</p>
+                <p class="text-[11px] text-gray-400">${formatCurrency(p.valor_vendido)}</p>
+            </div>
+        </div>
+    `).join('');
+}
 
-            const prioridadColors = {
-                'URGENTE': 'bg-red-100 text-red-700',
-                'ALTA': 'bg-orange-100 text-orange-700',
-                'MEDIA': 'bg-yellow-100 text-yellow-700',
-                'BAJA': 'bg-gray-100 text-gray-700'
-            };
+// ============================================
+// ALERTAS
+// ============================================
+async function loadAlertas() {
+    const tipo = document.getElementById('filtro-alerta-tipo').value;
+    const nivel = document.getElementById('filtro-alerta-nivel').value;
+    const estado = document.getElementById('filtro-alerta-estado').value;
+    const regional = getRegional();
+    let qs = `?limit=100`;
+    if (tipo) qs += `&tipo=${tipo}`;
+    if (nivel) qs += `&nivel=${nivel}`;
+    if (estado) qs += `&estado=${estado}`;
+    if (regional) qs += `&regional=${regional}`;
 
-            document.getElementById('content-traslados').innerHTML = traslados.map(t => `
-                <div class="p-4 bg-white rounded-lg border border-gray-200 hover:shadow-md transition-shadow mb-3">
-                    <div class="flex items-center gap-3">
-                        <div class="flex-1">
-                            <p class="font-medium text-gray-900 text-sm">${(t.producto_nombre || t.referencia).substring(0, 50)}</p>
-                            <div class="flex items-center gap-2 mt-2 text-sm">
-                                <span class="text-gray-600">${t.origen_nombre || t.bodega_origen}</span>
-                                <span class="text-blue-500">→</span>
-                                <span class="font-medium text-blue-600">${t.destino_nombre || t.bodega_destino}</span>
-                            </div>
-                            <div class="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                                <span>Cantidad: <strong>${Math.round(t.cantidad_sugerida)}</strong></span>
-                                <span>Origen: ${Math.round(t.dias_inv_origen)}d</span>
-                                <span>Destino: ${t.dias_inv_destino.toFixed(1)}d</span>
-                            </div>
-                        </div>
-                        <span class="px-2 py-1 rounded text-xs font-medium ${prioridadColors[t.prioridad]}">${t.prioridad}</span>
-                    </div>
+    try {
+        const data = await api('/alertas' + qs);
+        renderAlertas(data);
+    } catch (e) { console.error(e); }
+}
+
+function renderAlertas(data) {
+    const el = document.getElementById('alertas-content');
+    if (!data.length) { el.innerHTML = '<p class="text-center text-gray-400 py-12">No hay alertas con estos filtros</p>'; return; }
+    const borderColors = { CRITICO: 'border-red-500', ALTO: 'border-orange-500', MEDIO: 'border-yellow-500', BAJO: 'border-blue-500' };
+    const bgColors = { CRITICO: 'bg-red-50', ALTO: 'bg-orange-50', MEDIO: 'bg-yellow-50', BAJO: 'bg-blue-50' };
+    el.innerHTML = data.map(a => `
+        <div class="p-4 rounded-lg border-l-4 ${borderColors[a.nivel] || 'border-gray-300'} ${bgColors[a.nivel] || 'bg-gray-50'} flex items-start justify-between gap-4">
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                    ${badge(a.nivel, a.nivel)}
+                    <span class="text-xs text-gray-500">${a.tipo_alerta.replace(/_/g, ' ')}</span>
+                    ${a.estado !== 'PENDIENTE' ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">${a.estado}</span>` : ''}
                 </div>
-            `).join('');
-            
-            document.getElementById('count-traslados').textContent = traslados.length;
-        }
+                <p class="font-medium text-gray-900 mt-1 text-sm">${truncate(a.producto_nombre || a.referencia, 65)}</p>
+                <p class="text-xs text-gray-600 mt-1">
+                    <span class="inline-flex items-center gap-1"><i data-lucide="map-pin" class="w-3 h-3"></i>${a.almacen_nombre || a.bodega_codigo}</span>
+                    ${a.regional ? ` · ${a.regional}` : ''} · Stock: <strong>${Math.round(a.stock_actual)}</strong>
+                    · ${a.dias_inventario < 9999 ? a.dias_inventario.toFixed(1) + ' días inv.' : 'Sin venta'}
+                </p>
+                ${a.atendida_por ? `<p class="text-[11px] text-gray-400 mt-1">Atendida por ${a.atendida_por}</p>` : ''}
+            </div>
+            ${a.estado === 'PENDIENTE' ? `
+            <div class="flex gap-1 flex-shrink-0">
+                <button onclick="updateAlerta(${a.id}, 'ATENDIDA')" class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200" title="Marcar como atendida">Atender</button>
+                <button onclick="updateAlerta(${a.id}, 'IGNORADA')" class="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200" title="Ignorar">Ignorar</button>
+            </div>` : ''}
+        </div>
+    `).join('');
+    lucide.createIcons();
+}
 
-        // Renderizar Almacenes
-        function renderAlmacenes(almacenes) {
-            document.getElementById('content-almacenes').innerHTML = `
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead>
-                            <tr class="border-b border-gray-200">
-                                <th class="text-left py-3 px-4 font-medium text-gray-600">Almacén</th>
-                                <th class="text-left py-3 px-4 font-medium text-gray-600">Regional</th>
-                                <th class="text-right py-3 px-4 font-medium text-gray-600">Productos</th>
-                                <th class="text-right py-3 px-4 font-medium text-gray-600">Unidades</th>
-                                <th class="text-right py-3 px-4 font-medium text-gray-600">Valor</th>
-                                <th class="text-right py-3 px-4 font-medium text-gray-600">Días Inv.</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${almacenes.map(a => `
-                                <tr class="border-b border-gray-100 hover:bg-gray-50">
-                                    <td class="py-3 px-4">
-                                        <div class="font-medium text-gray-900">${a.nombre}</div>
-                                        <div class="text-xs text-gray-500">${a.codigo}</div>
-                                    </td>
-                                    <td class="py-3 px-4 text-gray-600">${a.regional || '-'}</td>
-                                    <td class="py-3 px-4 text-right text-gray-900">${formatNumber(a.productos)}</td>
-                                    <td class="py-3 px-4 text-right text-gray-900">${formatNumber(a.unidades)}</td>
-                                    <td class="py-3 px-4 text-right text-gray-900">${formatCurrency(a.valor_inventario)}</td>
-                                    <td class="py-3 px-4 text-right">
-                                        <span class="px-2 py-1 rounded text-xs font-medium ${
-                                            a.dias_inv_promedio < 15 ? 'bg-red-100 text-red-700' :
-                                            a.dias_inv_promedio < 30 ? 'bg-yellow-100 text-yellow-700' :
-                                            'bg-green-100 text-green-700'
-                                        }">${a.dias_inv_promedio ? Math.round(a.dias_inv_promedio) : '-'}</span>
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
+async function updateAlerta(id, estado) {
+    try { await api(`/alertas/${id}/estado`, { method: 'PATCH', body: JSON.stringify({ estado }) }); loadAlertas(); }
+    catch (e) { alert('Error: ' + e.message); }
+}
+
+// ============================================
+// TRASLADOS
+// ============================================
+async function loadTraslados() {
+    const prioridad = document.getElementById('filtro-traslado-prioridad').value;
+    const estado = document.getElementById('filtro-traslado-estado').value;
+    const regional = getRegional();
+    let qs = '?limit=100';
+    if (prioridad) qs += `&prioridad=${prioridad}`;
+    if (estado) qs += `&estado=${estado}`;
+    if (regional) qs += `&regional=${regional}`;
+    try { renderTraslados(await api('/traslados' + qs)); } catch (e) { console.error(e); }
+}
+
+function renderTraslados(data) {
+    const el = document.getElementById('traslados-content');
+    if (!data.length) { el.innerHTML = '<p class="text-center text-gray-400 py-12">No hay traslados con estos filtros</p>'; return; }
+    el.innerHTML = data.map(t => `
+        <div class="p-4 bg-white rounded-lg border border-gray-200 hover:shadow-md transition-shadow flex items-center gap-4">
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                    ${badge(t.prioridad, t.prioridad)}
+                    ${t.estado !== 'PENDIENTE' ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">${t.estado}</span>` : ''}
                 </div>
-            `;
-            
-            document.getElementById('count-almacenes').textContent = almacenes.length;
-        }
+                <p class="font-medium text-gray-900 text-sm mt-1">${truncate(t.producto_nombre || t.referencia, 55)}</p>
+                <div class="flex items-center gap-2 mt-1.5 text-sm">
+                    <span class="text-gray-500">${t.origen_nombre || t.bodega_origen}</span>
+                    <i data-lucide="arrow-right" class="w-3.5 h-3.5 text-blue-500"></i>
+                    <span class="font-medium text-blue-600">${t.destino_nombre || t.bodega_destino}</span>
+                </div>
+                <div class="flex items-center gap-4 mt-1 text-xs text-gray-500">
+                    <span>Cantidad: <strong>${Math.round(t.cantidad_sugerida)}</strong></span>
+                    <span>Origen: ${Math.round(t.dias_inv_origen)}d</span>
+                    <span>Destino: ${t.dias_inv_destino.toFixed(1)}d</span>
+                    ${t.regional ? `<span>· ${t.regional}</span>` : ''}
+                </div>
+            </div>
+            ${t.estado === 'PENDIENTE' ? `
+            <div class="flex flex-col gap-1 flex-shrink-0">
+                <button onclick="updateTraslado(${t.id}, 'APROBADO')" class="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200">Aprobar</button>
+                <button onclick="updateTraslado(${t.id}, 'EJECUTADO')" class="px-3 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200">Ejecutar</button>
+                <button onclick="updateTraslado(${t.id}, 'RECHAZADO')" class="px-3 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200">Rechazar</button>
+            </div>` : ''}
+        </div>
+    `).join('');
+    lucide.createIcons();
+}
 
-        // Cambiar tab
-        function showTab(tab) {
-            currentTab = tab;
-            
-            // Ocultar todos los contenidos
-            document.getElementById('content-alertas').classList.add('hidden');
-            document.getElementById('content-traslados').classList.add('hidden');
-            document.getElementById('content-almacenes').classList.add('hidden');
-            
-            // Mostrar el contenido seleccionado
-            document.getElementById('content-' + tab).classList.remove('hidden');
-            
-            // Actualizar estilos de tabs
-            ['alertas', 'traslados', 'almacenes'].forEach(t => {
-                const tabEl = document.getElementById('tab-' + t);
-                if (t === tab) {
-                    tabEl.classList.remove('border-transparent', 'text-gray-500');
-                    tabEl.classList.add('border-blue-600', 'text-blue-600');
-                } else {
-                    tabEl.classList.add('border-transparent', 'text-gray-500');
-                    tabEl.classList.remove('border-blue-600', 'text-blue-600');
-                }
+async function updateTraslado(id, estado) {
+    try { await api(`/traslados/${id}/estado`, { method: 'PATCH', body: JSON.stringify({ estado }) }); loadTraslados(); }
+    catch (e) { alert('Error: ' + e.message); }
+}
+
+// ============================================
+// COMPRAS
+// ============================================
+async function loadCompras() {
+    const prioridad = document.getElementById('filtro-compra-prioridad').value;
+    const marca = document.getElementById('filtro-compra-marca').value;
+    let qs = '?limit=100';
+    if (prioridad) qs += `&prioridad=${prioridad}`;
+    if (marca) qs += `&marca=${marca}`;
+    try { renderCompras(await api('/compras' + qs)); } catch (e) { console.error(e); }
+}
+
+function renderCompras(data) {
+    const el = document.getElementById('compras-content');
+    if (!data.length) { el.innerHTML = '<p class="text-center text-gray-400 py-12">No hay recomendaciones de compra</p>'; return; }
+    el.innerHTML = `
+        <div class="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="border-b border-gray-200 bg-gray-50">
+                    <th class="text-left py-3 px-4 font-medium text-gray-600">Producto</th>
+                    <th class="text-left py-3 px-4 font-medium text-gray-600">Marca</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Stock Red</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Cant. Sugerida</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Cobertura Actual</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Cob. Objetivo</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Valor Est.</th>
+                    <th class="text-center py-3 px-4 font-medium text-gray-600">Prioridad</th>
+                </tr></thead>
+                <tbody>${data.map(c => `
+                    <tr class="border-b border-gray-50 hover:bg-gray-50">
+                        <td class="py-2.5 px-4">
+                            <p class="font-medium text-gray-900 text-xs">${truncate(c.producto_nombre || c.referencia, 40)}</p>
+                            <p class="text-[11px] text-gray-400">${c.referencia}</p>
+                        </td>
+                        <td class="py-2.5 px-4 text-xs text-gray-600">${c.marca_nombre || '-'} <span class="text-gray-400">${c.marca_clasificacion || ''}</span></td>
+                        <td class="py-2.5 px-4 text-right text-xs">${formatNumber(c.stock_actual_red)}</td>
+                        <td class="py-2.5 px-4 text-right text-xs font-semibold text-blue-600">${formatNumber(c.cantidad_sugerida)}</td>
+                        <td class="py-2.5 px-4 text-right text-xs ${c.dias_cobertura_actual < 7 ? 'text-red-600 font-semibold' : ''}">${Math.round(c.dias_cobertura_actual)}d</td>
+                        <td class="py-2.5 px-4 text-right text-xs text-gray-500">${Math.round(c.dias_cobertura_objetivo)}d</td>
+                        <td class="py-2.5 px-4 text-right text-xs">${formatCurrency(c.valor_compra_estimado)}</td>
+                        <td class="py-2.5 px-4 text-center">${badge(c.prioridad, c.prioridad)}</td>
+                    </tr>
+                `).join('')}</tbody>
+            </table>
+        </div>`;
+}
+
+// ============================================
+// ALMACENES
+// ============================================
+async function loadAlmacenes() {
+    const tipo = document.getElementById('filtro-almacen-tipo').value;
+    const regional = getRegional();
+    let qs = '?';
+    if (tipo) qs += `tipo=${tipo}&`;
+    if (regional) qs += `regional=${regional}&`;
+    try { renderAlmacenes(await api('/almacenes' + qs)); } catch (e) { console.error(e); }
+}
+
+function renderAlmacenes(data) {
+    const el = document.getElementById('almacenes-content');
+    if (!data.length) { el.innerHTML = '<p class="text-center text-gray-400 py-12">No hay almacenes con estos filtros</p>'; return; }
+    el.innerHTML = `
+        <div class="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="border-b border-gray-200 bg-gray-50">
+                    <th class="text-left py-3 px-4 font-medium text-gray-600">Almacén</th>
+                    <th class="text-left py-3 px-4 font-medium text-gray-600">Regional</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Productos</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Unidades</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Valor</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Días Inv.</th>
+                </tr></thead>
+                <tbody>${data.map(a => `
+                    <tr class="border-b border-gray-50 hover:bg-gray-50">
+                        <td class="py-2.5 px-4"><p class="font-medium text-gray-900 text-xs">${a.nombre}</p><p class="text-[11px] text-gray-400">${a.codigo}${a.es_cedi ? ' · CEDI' : ''}</p></td>
+                        <td class="py-2.5 px-4 text-xs text-gray-600">${a.regional || '-'}</td>
+                        <td class="py-2.5 px-4 text-right text-xs">${formatNumber(a.productos)}</td>
+                        <td class="py-2.5 px-4 text-right text-xs">${formatNumber(a.unidades)}</td>
+                        <td class="py-2.5 px-4 text-right text-xs">${formatCurrency(a.valor_inventario)}</td>
+                        <td class="py-2.5 px-4 text-right"><span class="px-2 py-0.5 rounded text-xs font-medium ${
+                            a.dias_inv_promedio < 15 ? 'bg-red-100 text-red-700' : a.dias_inv_promedio < 30 ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+                        }">${a.dias_inv_promedio ? Math.round(a.dias_inv_promedio) : '-'}</span></td>
+                    </tr>
+                `).join('')}</tbody>
+            </table>
+        </div>`;
+}
+
+// ============================================
+// PRODUCTOS
+// ============================================
+function debounceSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(searchProductos, 400);
+}
+
+async function searchProductos() {
+    const q = document.getElementById('producto-search').value.trim();
+    const el = document.getElementById('productos-results');
+    document.getElementById('producto-detalle').classList.add('hidden');
+    if (q.length < 2) { el.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Escribe al menos 2 caracteres para buscar</p>'; return; }
+    try {
+        const data = await api(`/productos/buscar?q=${encodeURIComponent(q)}&limit=30`);
+        if (!data.length) { el.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Sin resultados</p>'; return; }
+        el.innerHTML = `<div class="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+            <table class="w-full text-sm"><thead><tr class="border-b border-gray-200 bg-gray-50">
+                <th class="text-left py-3 px-4 font-medium text-gray-600">Producto</th>
+                <th class="text-left py-3 px-4 font-medium text-gray-600">Marca</th>
+                <th class="text-right py-3 px-4 font-medium text-gray-600">Stock Total</th>
+                <th class="text-right py-3 px-4 font-medium text-gray-600">Almacenes</th>
+                <th class="text-center py-3 px-4 font-medium text-gray-600">Acción</th>
+            </tr></thead><tbody>${data.map(p => `
+                <tr class="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onclick="openProductoDetalle('${encodeURIComponent(p.referencia)}')">
+                    <td class="py-2.5 px-4"><p class="font-medium text-gray-900 text-xs">${truncate(p.nombre || p.referencia, 45)}</p><p class="text-[11px] text-gray-400">${p.referencia}</p></td>
+                    <td class="py-2.5 px-4 text-xs text-gray-600">${p.marca || '-'}</td>
+                    <td class="py-2.5 px-4 text-right text-xs font-semibold">${formatNumber(p.stock_total)}</td>
+                    <td class="py-2.5 px-4 text-right text-xs">${p.almacenes_con_stock}</td>
+                    <td class="py-2.5 px-4 text-center"><button class="text-blue-600 hover:text-blue-800 text-xs font-medium">Ver detalle</button></td>
+                </tr>
+            `).join('')}</tbody></table></div>`;
+    } catch (e) { el.innerHTML = `<p class="text-red-500 text-sm text-center py-4">${e.message}</p>`; }
+}
+
+async function openProductoDetalle(refEncoded) {
+    try {
+        const data = await api(`/productos/detalle?ref=${refEncoded}`);
+        if (!data) return;
+        const p = data.producto;
+        const estadoColors = { CRITICO: 'text-red-600', BAJO: 'text-orange-600', NORMAL: 'text-green-600', SOBRE: 'text-yellow-600', EXCESO: 'text-red-600' };
+        document.getElementById('modal-title').textContent = truncate(p.nombre || p.referencia, 60);
+        document.getElementById('modal-body').innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div><p class="text-xs text-gray-500">Referencia</p><p class="text-sm font-medium">${p.referencia}</p></div>
+                <div><p class="text-xs text-gray-500">Marca</p><p class="text-sm font-medium">${p.marca || '-'} <span class="text-gray-400">${p.categoria || ''} ${p.clasificacion || ''}</span></p></div>
+                <div><p class="text-xs text-gray-500">Stock Total</p><p class="text-sm font-bold text-blue-600">${formatNumber(data.almacenes.reduce((s,a) => s + a.stock, 0))}</p></div>
+                <div><p class="text-xs text-gray-500">Cobertura Obj.</p><p class="text-sm font-medium">${p.dias_cobertura || '-'} días</p></div>
+            </div>
+            <h4 class="font-semibold text-sm text-gray-700 mb-3">Stock por Almacén (${data.almacenes.length})</h4>
+            <div class="bg-gray-50 rounded-lg overflow-x-auto mb-6">
+                <table class="w-full text-xs">
+                    <thead><tr class="border-b border-gray-200">
+                        <th class="text-left py-2 px-3 font-medium text-gray-600">Almacén</th>
+                        <th class="text-left py-2 px-3 font-medium text-gray-600">Regional</th>
+                        <th class="text-right py-2 px-3 font-medium text-gray-600">Stock</th>
+                        <th class="text-right py-2 px-3 font-medium text-gray-600">Vta. Diaria</th>
+                        <th class="text-right py-2 px-3 font-medium text-gray-600">Días Inv.</th>
+                        <th class="text-center py-2 px-3 font-medium text-gray-600">Estado</th>
+                    </tr></thead>
+                    <tbody>${data.almacenes.map(a => `
+                        <tr class="border-b border-gray-100">
+                            <td class="py-2 px-3 font-medium">${a.nombre} <span class="text-gray-400">(${a.tipo})</span></td>
+                            <td class="py-2 px-3 text-gray-500">${a.regional || '-'}</td>
+                            <td class="py-2 px-3 text-right font-semibold">${formatNumber(a.stock)}</td>
+                            <td class="py-2 px-3 text-right">${a.venta_diaria.toFixed(2)}</td>
+                            <td class="py-2 px-3 text-right">${a.dias_inventario < 9999 ? Math.round(a.dias_inventario) : '∞'}</td>
+                            <td class="py-2 px-3 text-center"><span class="font-medium ${estadoColors[a.estado] || 'text-gray-500'}">${a.estado}</span></td>
+                        </tr>
+                    `).join('')}</tbody>
+                </table>
+            </div>
+            ${data.ventas_30d.length ? `
+            <h4 class="font-semibold text-sm text-gray-700 mb-3">Ventas últimos 30 días</h4>
+            <canvas id="chart-producto-ventas" height="150"></canvas>` : '<p class="text-gray-400 text-sm">Sin ventas en los últimos 30 días</p>'}`;
+
+        document.getElementById('modal-producto').classList.remove('hidden');
+        lucide.createIcons();
+
+        if (data.ventas_30d.length) {
+            new Chart(document.getElementById('chart-producto-ventas'), {
+                type: 'bar',
+                data: {
+                    labels: data.ventas_30d.map(v => { const d = new Date(v.fecha + 'T12:00:00'); return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }); }),
+                    datasets: [{ label: 'Unidades', data: data.ventas_30d.map(v => v.cantidad), backgroundColor: 'rgba(59,130,246,.6)', borderRadius: 4 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } } }
             });
         }
+    } catch (e) { console.error(e); }
+}
 
-        // Cargar datos
-        async function loadData() {
-            try {
-                const [kpis, alertas, traslados, almacenes] = await Promise.all([
-                    fetch(API_URL + '/kpis').then(r => r.json()),
-                    fetch(API_URL + '/alertas?limit=30').then(r => r.json()),
-                    fetch(API_URL + '/traslados?limit=30').then(r => r.json()),
-                    fetch(API_URL + '/almacenes').then(r => r.json())
-                ]);
+function closeModal() { document.getElementById('modal-producto').classList.add('hidden'); }
 
-                renderKPIs(kpis);
-                renderAlertas(alertas);
-                renderTraslados(traslados);
-                renderAlmacenes(almacenes);
-                
-                document.getElementById('lastUpdate').textContent = 'Actualizado: ' + new Date().toLocaleTimeString();
-                
-                lucide.createIcons();
-            } catch (err) {
-                console.error('Error cargando datos:', err);
-                alert('Error conectando con la API. Verifica que esté corriendo en http://localhost:5001');
-            }
-        }
+// ============================================
+// REGIONALES
+// ============================================
+async function loadRegionales() {
+    try {
+        const data = await api('/regionales');
+        renderRegionales(data);
+    } catch (e) { console.error(e); }
+}
 
-        // Inicializar
-        document.addEventListener('DOMContentLoaded', () => {
-            lucide.createIcons();
-            loadData();
-            // Refrescar cada 60 segundos
-            setInterval(loadData, 60000);
-        });
-    </script>
+function renderRegionales(data) {
+    const el = document.getElementById('regionales-content');
+    if (!data.length) { el.innerHTML = '<p class="text-gray-400 text-center py-12">Sin datos de regionales</p>'; return; }
+    const colors = ['from-blue-500 to-blue-700', 'from-emerald-500 to-emerald-700', 'from-purple-500 to-purple-700', 'from-orange-500 to-orange-700', 'from-pink-500 to-pink-700'];
+    el.innerHTML = data.map((r, i) => `
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="bg-gradient-to-r ${colors[i % colors.length]} px-5 py-4">
+                <h3 class="text-white font-bold text-lg">${r.nombre}</h3>
+                <p class="text-white/70 text-xs">${r.almacenes_venta} almacenes de venta</p>
+            </div>
+            <div class="p-5 space-y-3">
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Valor Inventario</span><span class="text-sm font-semibold">${formatCurrency(r.valor_inventario)}</span></div>
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Ventas 30 días</span><span class="text-sm font-semibold text-blue-600">${formatCurrency(r.ventas_30d)}</span></div>
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Alertas Pendientes</span><span class="text-sm font-semibold ${r.alertas_criticas > 0 ? 'text-red-600' : ''}">${r.alertas_pendientes} <span class="text-xs font-normal text-gray-400">(${r.alertas_criticas} críticas)</span></span></div>
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Traslados Pendientes</span><span class="text-sm font-semibold text-purple-600">${r.traslados_pendientes}</span></div>
+                ${r.ventas_30d && r.valor_inventario ? `
+                <div class="pt-2 border-t border-gray-100">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs text-gray-500">Rotación</span>
+                        <span class="text-sm font-bold ${(r.ventas_30d / r.valor_inventario) > 0.3 ? 'text-green-600' : 'text-yellow-600'}">${((r.ventas_30d / r.valor_inventario) * 100).toFixed(1)}%</span>
+                    </div>
+                </div>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+// ============================================
+// EXPORT
+// ============================================
+function exportData(tipo) {
+    const regional = getRegional();
+    let qs = `?limit=1000`;
+    if (regional) qs += `&regional=${regional}`;
+    if (tipo === 'alertas') {
+        qs += `&estado=${document.getElementById('filtro-alerta-estado').value}`;
+        const t = document.getElementById('filtro-alerta-tipo').value;
+        const n = document.getElementById('filtro-alerta-nivel').value;
+        if (t) qs += `&tipo=${t}`;
+        if (n) qs += `&nivel=${n}`;
+    }
+    if (tipo === 'traslados') {
+        qs += `&estado=${document.getElementById('filtro-traslado-estado').value}`;
+        const p = document.getElementById('filtro-traslado-prioridad').value;
+        if (p) qs += `&prioridad=${p}`;
+    }
+    window.open(API_URL + `/export/${tipo}${qs}`, '_blank');
+}
+
+// ============================================
+// INIT
+// ============================================
+async function initApp() {
+    try {
+        filtros = await api('/filtros');
+        const sel = document.getElementById('global-regional');
+        sel.innerHTML = '<option value="">Todas las regionales</option>' +
+            filtros.regionales.map(r => `<option value="${r.codigo}">${r.nombre}</option>`).join('');
+        const marcaSel = document.getElementById('filtro-compra-marca');
+        marcaSel.innerHTML = '<option value="">Todas las marcas</option>' +
+            filtros.marcas.filter(m => m.categoria === 'PRINCIPAL').map(m => `<option value="${m.codigo}">${m.nombre} (${m.clasificacion})</option>`).join('');
+    } catch (e) { console.error('Error cargando filtros:', e); }
+    loadDashboard();
+    setInterval(() => { if (currentPage === 'dashboard') loadDashboard(); }, 120000);
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    lucide.createIcons();
+    document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+    document.getElementById('login-user').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-pass').focus(); });
+    if (await checkAuth()) showApp();
+});
+</script>
 </body>
 </html>

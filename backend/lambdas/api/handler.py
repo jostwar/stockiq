@@ -1,16 +1,22 @@
 """
 API REST para Dashboard StockIQ - Versión Lambda
-Usa pg8000 (Python puro) en lugar de psycopg2
+Incluye: Auth, Alertas, Traslados, Compras, Búsqueda, Regionales, Exportación CSV
 """
 
 import json
 import os
+import hashlib
+import uuid
+from datetime import date, datetime, timedelta
 import pg8000
 import boto3
 
 
+# ============================================
+# DATABASE
+# ============================================
+
 def get_db_credentials():
-    """Obtiene credenciales de Secrets Manager"""
     if os.environ.get('LOCAL_DEV'):
         return {
             'host': os.environ.get('DB_HOST'),
@@ -19,12 +25,10 @@ def get_db_credentials():
             'user': os.environ.get('DB_USER'),
             'password': os.environ.get('DB_PASSWORD')
         }
-    
     secrets_client = boto3.client('secretsmanager')
     secret_arn = os.environ['DB_SECRET_ARN']
-    response = secrets_client.get_secret_value(SecretId=secret_arn)
-    secret = json.loads(response['SecretString'])
-    
+    resp = secrets_client.get_secret_value(SecretId=secret_arn)
+    secret = json.loads(resp['SecretString'])
     return {
         'host': secret['host'],
         'port': secret['port'],
@@ -36,348 +40,832 @@ def get_db_credentials():
 
 def get_db():
     creds = get_db_credentials()
-    conn = pg8000.connect(
+    return pg8000.connect(
         host=creds['host'],
         port=int(creds['port']),
         database=creds['database'],
         user=creds['user'],
         password=creds['password']
     )
-    return conn
 
 
-def query_to_dict(cursor, rows):
-    """Convierte resultados a lista de diccionarios"""
-    columns = [desc[0] for desc in cursor.description]
-    return [dict(zip(columns, row)) for row in rows]
+# ============================================
+# HELPERS
+# ============================================
 
-
-def response(status_code, body):
-    """Genera respuesta HTTP para API Gateway"""
+def api_response(status_code, body):
     return {
         'statusCode': status_code,
         'headers': {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+            'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS'
         },
         'body': json.dumps(body, default=str)
     }
 
 
-def get_kpis():
-    """KPIs principales del dashboard"""
-    conn = get_db()
-    cur = conn.cursor()
-    
-    cur.execute("""
-        SELECT 
-            COUNT(DISTINCT referencia),
-            COUNT(DISTINCT bodega_codigo),
-            COALESCE(SUM(cantidad), 0),
-            COALESCE(SUM(cantidad * valor_costo), 0)
-        FROM inventario_actual
-    """)
-    row = cur.fetchone()
-    inventario = {
-        'total_productos': row[0],
-        'total_almacenes': row[1],
-        'total_unidades': float(row[2]) if row[2] else 0,
-        'valor_inventario': float(row[3]) if row[3] else 0
-    }
-    
-    cur.execute("""
-        SELECT 
-            COUNT(*),
-            COALESCE(SUM(cantidad), 0),
-            COALESCE(SUM(valor_total), 0)
-        FROM ventas
-        WHERE fecha >= CURRENT_DATE - INTERVAL '30 days'
-    """)
-    row = cur.fetchone()
-    ventas = {
-        'transacciones': row[0],
-        'unidades': float(row[1]) if row[1] else 0,
-        'valor': float(row[2]) if row[2] else 0
-    }
-    
-    cur.execute("""
-        SELECT 
-            COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_CRITICO'),
-            COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_BAJO'),
-            COUNT(*) FILTER (WHERE tipo_alerta = 'SOBREINVENTARIO'),
-            COUNT(*)
-        FROM alertas
-        WHERE estado = 'PENDIENTE'
-    """)
-    row = cur.fetchone()
-    alertas = {
-        'criticas': row[0],
-        'bajas': row[1],
-        'sobreinventario': row[2],
-        'total': row[3]
-    }
-    
-    cur.execute("SELECT COUNT(*) FROM recomendaciones_traslado WHERE estado = 'PENDIENTE'")
-    row = cur.fetchone()
-    traslados_pendientes = row[0]
-    
-    conn.close()
-    
+def csv_response(filename, csv_content):
     return {
-        'inventario': inventario,
-        'ventas_30d': ventas,
-        'alertas': alertas,
-        'traslados_pendientes': traslados_pendientes
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+            'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS'
+        },
+        'body': csv_content
     }
 
 
-def get_alertas(limit=50, tipo=None, nivel=None):
-    """Lista de alertas con filtros"""
+def safe_float(val):
+    return float(val) if val is not None else 0
+
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def generate_token():
+    return uuid.uuid4().hex + uuid.uuid4().hex
+
+
+# ============================================
+# AUTH
+# ============================================
+
+def authenticate(event):
+    headers = event.get('headers', {}) or {}
+    auth = headers.get('Authorization') or headers.get('authorization', '')
+    if not auth.startswith('Bearer '):
+        return None
+
+    token = auth[7:]
     conn = get_db()
     cur = conn.cursor()
-    
+    cur.execute("""
+        SELECT u.id, u.username, u.nombre, u.rol
+        FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id
+        WHERE s.token = %s AND s.expires_at > NOW() AND u.activo = true
+    """, (token,))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {'id': row[0], 'username': row[1], 'nombre': row[2], 'rol': row[3]}
+
+
+def login(body):
+    data = json.loads(body) if isinstance(body, str) else (body or {})
+    username = data.get('username', '')
+    password = data.get('password', '')
+
+    if not username or not password:
+        return api_response(400, {'error': 'Usuario y contraseña requeridos'})
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, username, nombre, rol, password_hash FROM usuarios WHERE username = %s AND activo = true",
+        (username,)
+    )
+    row = cur.fetchone()
+
+    if not row or row[4] != hash_password(password):
+        conn.close()
+        return api_response(401, {'error': 'Credenciales inválidas'})
+
+    token = generate_token()
+    expires = datetime.now() + timedelta(hours=24)
+    cur.execute("INSERT INTO sesiones (token, usuario_id, expires_at) VALUES (%s, %s, %s)",
+                (token, row[0], expires))
+    cur.execute("DELETE FROM sesiones WHERE expires_at < NOW()")
+    conn.commit()
+    conn.close()
+
+    return api_response(200, {
+        'token': token,
+        'user': {'id': row[0], 'username': row[1], 'nombre': row[2], 'rol': row[3]}
+    })
+
+
+def logout(event):
+    headers = event.get('headers', {}) or {}
+    auth = headers.get('Authorization') or headers.get('authorization', '')
+    if auth.startswith('Bearer '):
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM sesiones WHERE token = %s", (auth[7:],))
+        conn.commit()
+        conn.close()
+    return api_response(200, {'message': 'Sesión cerrada'})
+
+
+# ============================================
+# FILTROS (listas para dropdowns)
+# ============================================
+
+def get_filtros():
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT codigo, nombre FROM regionales WHERE activo = true ORDER BY nombre")
+    regionales = [{'codigo': r[0], 'nombre': r[1]} for r in cur.fetchall()]
+
+    cur.execute("SELECT codigo, nombre, regional FROM almacenes WHERE activo = true AND tipo = 'Venta' ORDER BY nombre")
+    almacenes = [{'codigo': r[0], 'nombre': r[1], 'regional': r[2]} for r in cur.fetchall()]
+
+    cur.execute("SELECT codigo, nombre, categoria, clasificacion FROM marcas WHERE activo = true ORDER BY categoria, clasificacion, nombre")
+    marcas = [{'codigo': r[0], 'nombre': r[1], 'categoria': r[2], 'clasificacion': r[3]} for r in cur.fetchall()]
+
+    conn.close()
+    return {
+        'regionales': regionales,
+        'almacenes': almacenes,
+        'marcas': marcas,
+        'tipos_alerta': ['STOCK_CRITICO', 'STOCK_BAJO', 'SOBREINVENTARIO', 'BAJA_ROTACION'],
+        'niveles_alerta': ['CRITICO', 'ALTO', 'MEDIO', 'BAJO'],
+        'prioridades': ['URGENTE', 'ALTA', 'MEDIA', 'BAJA']
+    }
+
+
+# ============================================
+# KPIs
+# ============================================
+
+def get_kpis(params):
+    regional = params.get('regional')
+    conn = get_db()
+    cur = conn.cursor()
+
+    if regional:
+        cur.execute("""
+            SELECT COUNT(DISTINCT ia.referencia), COUNT(DISTINCT ia.bodega_codigo),
+                   COALESCE(SUM(ia.cantidad), 0), COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
+            FROM inventario_actual ia
+            JOIN almacenes a ON a.codigo = ia.bodega_codigo
+            WHERE a.regional = %s
+        """, (regional,))
+    else:
+        cur.execute("""
+            SELECT COUNT(DISTINCT referencia), COUNT(DISTINCT bodega_codigo),
+                   COALESCE(SUM(cantidad), 0), COALESCE(SUM(cantidad * valor_costo), 0)
+            FROM inventario_actual
+        """)
+    r = cur.fetchone()
+    inventario = {
+        'total_productos': r[0], 'total_almacenes': r[1],
+        'total_unidades': safe_float(r[2]), 'valor_inventario': safe_float(r[3])
+    }
+
+    d30 = date.today() - timedelta(days=30)
+    if regional:
+        cur.execute("""
+            SELECT COUNT(*), COALESCE(SUM(v.cantidad), 0), COALESCE(SUM(v.valor_total), 0)
+            FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
+            WHERE v.fecha >= %s AND a.regional = %s
+        """, (d30, regional))
+    else:
+        cur.execute("""
+            SELECT COUNT(*), COALESCE(SUM(cantidad), 0), COALESCE(SUM(valor_total), 0)
+            FROM ventas WHERE fecha >= %s
+        """, (d30,))
+    r = cur.fetchone()
+    ventas = {'transacciones': r[0], 'unidades': safe_float(r[1]), 'valor': safe_float(r[2])}
+
+    if regional:
+        cur.execute("""
+            SELECT COUNT(*) FILTER (WHERE al.tipo_alerta = 'STOCK_CRITICO'),
+                   COUNT(*) FILTER (WHERE al.tipo_alerta = 'STOCK_BAJO'),
+                   COUNT(*) FILTER (WHERE al.tipo_alerta = 'SOBREINVENTARIO'),
+                   COUNT(*)
+            FROM alertas al JOIN almacenes a ON a.codigo = al.bodega_codigo
+            WHERE al.estado = 'PENDIENTE' AND a.regional = %s
+        """, (regional,))
+    else:
+        cur.execute("""
+            SELECT COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_CRITICO'),
+                   COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_BAJO'),
+                   COUNT(*) FILTER (WHERE tipo_alerta = 'SOBREINVENTARIO'),
+                   COUNT(*)
+            FROM alertas WHERE estado = 'PENDIENTE'
+        """)
+    r = cur.fetchone()
+    alertas = {'criticas': r[0], 'bajas': r[1], 'sobreinventario': r[2], 'total': r[3]}
+
+    if regional:
+        cur.execute("SELECT COUNT(*) FROM recomendaciones_traslado WHERE estado = 'PENDIENTE' AND regional_destino = %s", (regional,))
+    else:
+        cur.execute("SELECT COUNT(*) FROM recomendaciones_traslado WHERE estado = 'PENDIENTE'")
+    traslados_pendientes = cur.fetchone()[0]
+
+    # Compras pendientes
+    cur.execute("SELECT COUNT(*), COALESCE(SUM(valor_compra_estimado), 0) FROM recomendaciones_compra WHERE estado = 'PENDIENTE'")
+    r = cur.fetchone()
+    compras = {'total': r[0], 'valor_estimado': safe_float(r[1])}
+
+    conn.close()
+    return {
+        'inventario': inventario, 'ventas_30d': ventas, 'alertas': alertas,
+        'traslados_pendientes': traslados_pendientes, 'compras': compras
+    }
+
+
+# ============================================
+# ALERTAS
+# ============================================
+
+def get_alertas(params):
+    limit = int(params.get('limit', 50))
+    tipo = params.get('tipo')
+    nivel = params.get('nivel')
+    regional = params.get('regional')
+    almacen = params.get('almacen')
+    estado = params.get('estado', 'PENDIENTE')
+
+    conn = get_db()
+    cur = conn.cursor()
     query = """
-        SELECT 
-            a.id, a.tipo_alerta, a.nivel, a.referencia,
-            p.nombre, a.bodega_codigo, al.nombre,
-            a.stock_actual, a.dias_inventario, a.venta_diaria,
-            a.mensaje, a.fecha_generacion
+        SELECT a.id, a.tipo_alerta, a.nivel, a.referencia, p.nombre,
+               a.bodega_codigo, al.nombre, a.stock_actual, a.dias_inventario,
+               a.venta_diaria, a.mensaje, a.fecha_generacion, a.estado,
+               al.regional, a.marca_categoria, a.marca_clasificacion,
+               a.atendida_por, a.fecha_atencion
         FROM alertas a
         LEFT JOIN productos p ON p.referencia = a.referencia
         LEFT JOIN almacenes al ON al.codigo = a.bodega_codigo
-        WHERE a.estado = 'PENDIENTE'
+        WHERE 1=1
     """
-    params = []
-    
+    p = []
+    if estado:
+        query += " AND a.estado = %s"; p.append(estado)
     if tipo:
-        query += " AND a.tipo_alerta = %s"
-        params.append(tipo)
+        query += " AND a.tipo_alerta = %s"; p.append(tipo)
     if nivel:
-        query += " AND a.nivel = %s"
-        params.append(nivel)
-    
-    query += " ORDER BY a.dias_inventario ASC LIMIT %s"
-    params.append(limit)
-    
-    cur.execute(query, tuple(params))
+        query += " AND a.nivel = %s"; p.append(nivel)
+    if regional:
+        query += " AND al.regional = %s"; p.append(regional)
+    if almacen:
+        query += " AND a.bodega_codigo = %s"; p.append(almacen)
+    query += " ORDER BY a.fecha_generacion DESC LIMIT %s"
+    p.append(limit)
+
+    cur.execute(query, tuple(p))
     rows = cur.fetchall()
     conn.close()
-    
-    alertas = []
-    for row in rows:
-        alertas.append({
-            'id': row[0],
-            'tipo_alerta': row[1],
-            'nivel': row[2],
-            'referencia': row[3],
-            'producto_nombre': row[4],
-            'bodega_codigo': row[5],
-            'almacen_nombre': row[6],
-            'stock_actual': float(row[7]) if row[7] else 0,
-            'dias_inventario': float(row[8]) if row[8] else 0,
-            'venta_diaria': float(row[9]) if row[9] else 0,
-            'mensaje': row[10],
-            'fecha_generacion': row[11].isoformat() if row[11] else None
-        })
-    
-    return alertas
+
+    return [{
+        'id': r[0], 'tipo_alerta': r[1], 'nivel': r[2], 'referencia': r[3],
+        'producto_nombre': r[4], 'bodega_codigo': r[5], 'almacen_nombre': r[6],
+        'stock_actual': safe_float(r[7]), 'dias_inventario': safe_float(r[8]),
+        'venta_diaria': safe_float(r[9]), 'mensaje': r[10],
+        'fecha_generacion': r[11].isoformat() if r[11] else None,
+        'estado': r[12], 'regional': r[13],
+        'marca_categoria': r[14], 'marca_clasificacion': r[15],
+        'atendida_por': r[16],
+        'fecha_atencion': r[17].isoformat() if r[17] else None
+    } for r in rows]
 
 
-def get_traslados(limit=50, prioridad=None):
-    """Recomendaciones de traslado"""
+def update_alerta_estado(alerta_id, body, user):
+    data = json.loads(body) if isinstance(body, str) else (body or {})
+    nuevo_estado = data.get('estado')
+    if nuevo_estado not in ('VISTA', 'ATENDIDA', 'IGNORADA'):
+        return api_response(400, {'error': 'Estado inválido. Usar: VISTA, ATENDIDA, IGNORADA'})
+
     conn = get_db()
     cur = conn.cursor()
-    
+    cur.execute("""
+        UPDATE alertas SET estado = %s, atendida_por = %s, fecha_atencion = NOW()
+        WHERE id = %s
+    """, (nuevo_estado, user.get('nombre', user['username']), int(alerta_id)))
+    conn.commit()
+    conn.close()
+    return api_response(200, {'message': 'Alerta actualizada', 'id': alerta_id, 'estado': nuevo_estado})
+
+
+def get_alertas_resumen():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT tipo_alerta, nivel, COUNT(*) FROM alertas
+        WHERE estado = 'PENDIENTE' GROUP BY tipo_alerta, nivel ORDER BY tipo_alerta, nivel
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    return [{'tipo': r[0], 'nivel': r[1], 'cantidad': r[2]} for r in rows]
+
+
+# ============================================
+# TRASLADOS
+# ============================================
+
+def get_traslados(params):
+    limit = int(params.get('limit', 50))
+    prioridad = params.get('prioridad')
+    regional = params.get('regional')
+    estado = params.get('estado', 'PENDIENTE')
+
+    conn = get_db()
+    cur = conn.cursor()
     query = """
-        SELECT 
-            rt.id, rt.referencia, p.nombre,
-            rt.bodega_origen, ao.nombre,
-            rt.bodega_destino, ad.nombre,
-            rt.cantidad_sugerida, rt.dias_inv_origen, rt.dias_inv_destino,
-            rt.prioridad, rt.estado
+        SELECT rt.id, rt.referencia, p.nombre, rt.bodega_origen, ao.nombre,
+               rt.bodega_destino, ad.nombre, rt.cantidad_sugerida,
+               rt.dias_inv_origen, rt.dias_inv_destino, rt.prioridad, rt.estado,
+               rt.regional_destino, rt.ejecutada, rt.fecha_ejecucion
         FROM recomendaciones_traslado rt
         LEFT JOIN productos p ON p.referencia = rt.referencia
         LEFT JOIN almacenes ao ON ao.codigo = rt.bodega_origen
         LEFT JOIN almacenes ad ON ad.codigo = rt.bodega_destino
-        WHERE rt.estado = 'PENDIENTE'
+        WHERE 1=1
     """
-    params = []
-    
+    p = []
+    if estado:
+        query += " AND rt.estado = %s"; p.append(estado)
     if prioridad:
-        query += " AND rt.prioridad = %s"
-        params.append(prioridad)
-    
+        query += " AND rt.prioridad = %s"; p.append(prioridad)
+    if regional:
+        query += " AND rt.regional_destino = %s"; p.append(regional)
     query += " ORDER BY rt.dias_inv_destino ASC LIMIT %s"
-    params.append(limit)
-    
-    cur.execute(query, tuple(params))
+    p.append(limit)
+
+    cur.execute(query, tuple(p))
     rows = cur.fetchall()
     conn.close()
-    
-    traslados = []
-    for row in rows:
-        traslados.append({
-            'id': row[0],
-            'referencia': row[1],
-            'producto_nombre': row[2],
-            'bodega_origen': row[3],
-            'origen_nombre': row[4],
-            'bodega_destino': row[5],
-            'destino_nombre': row[6],
-            'cantidad_sugerida': float(row[7]) if row[7] else 0,
-            'dias_inv_origen': float(row[8]) if row[8] else 0,
-            'dias_inv_destino': float(row[9]) if row[9] else 0,
-            'prioridad': row[10],
-            'estado': row[11]
-        })
-    
-    return traslados
+
+    return [{
+        'id': r[0], 'referencia': r[1], 'producto_nombre': r[2],
+        'bodega_origen': r[3], 'origen_nombre': r[4],
+        'bodega_destino': r[5], 'destino_nombre': r[6],
+        'cantidad_sugerida': safe_float(r[7]),
+        'dias_inv_origen': safe_float(r[8]), 'dias_inv_destino': safe_float(r[9]),
+        'prioridad': r[10], 'estado': r[11], 'regional': r[12],
+        'ejecutada': r[13],
+        'fecha_ejecucion': r[14].isoformat() if r[14] else None
+    } for r in rows]
 
 
-def get_almacenes():
-    """Lista de almacenes con métricas"""
+def update_traslado_estado(traslado_id, body, user):
+    data = json.loads(body) if isinstance(body, str) else (body or {})
+    nuevo_estado = data.get('estado')
+    if nuevo_estado not in ('APROBADO', 'RECHAZADO', 'EJECUTADO'):
+        return api_response(400, {'error': 'Estado inválido. Usar: APROBADO, RECHAZADO, EJECUTADO'})
+
     conn = get_db()
     cur = conn.cursor()
-    
+    ejecutada = nuevo_estado == 'EJECUTADO'
     cur.execute("""
-        SELECT 
-            a.codigo, a.nombre, a.tipo, a.regional, a.es_cedi,
-            COUNT(DISTINCT m.referencia),
-            COALESCE(SUM(m.stock_actual), 0),
-            COALESCE(SUM(m.valor_stock), 0),
-            AVG(m.dias_inventario) FILTER (WHERE m.dias_inventario < 9999)
+        UPDATE recomendaciones_traslado
+        SET estado = %s, ejecutada = %s, fecha_ejecucion = CASE WHEN %s THEN NOW() ELSE fecha_ejecucion END
+        WHERE id = %s
+    """, (nuevo_estado, ejecutada, ejecutada, int(traslado_id)))
+    conn.commit()
+    conn.close()
+    return api_response(200, {'message': 'Traslado actualizado', 'id': traslado_id, 'estado': nuevo_estado})
+
+
+# ============================================
+# COMPRAS
+# ============================================
+
+def get_compras(params):
+    limit = int(params.get('limit', 50))
+    prioridad = params.get('prioridad')
+    marca = params.get('marca')
+
+    conn = get_db()
+    cur = conn.cursor()
+    query = """
+        SELECT rc.id, rc.referencia, p.nombre, m.nombre, rc.marca_categoria,
+               rc.marca_clasificacion, rc.stock_actual_red, rc.venta_proyectada,
+               rc.cantidad_sugerida, rc.dias_cobertura_actual, rc.dias_cobertura_objetivo,
+               rc.costo_unitario_estimado, rc.valor_compra_estimado,
+               rc.fecha_sugerida_pedido, rc.fecha_llegada_estimada, rc.prioridad, rc.estado
+        FROM recomendaciones_compra rc
+        LEFT JOIN productos p ON p.referencia = rc.referencia
+        LEFT JOIN marcas m ON m.codigo = rc.marca_codigo
+        WHERE rc.estado = 'PENDIENTE'
+    """
+    p = []
+    if prioridad:
+        query += " AND rc.prioridad = %s"; p.append(prioridad)
+    if marca:
+        query += " AND rc.marca_codigo = %s"; p.append(marca)
+    query += " ORDER BY rc.prioridad ASC, rc.dias_cobertura_actual ASC LIMIT %s"
+    p.append(limit)
+
+    cur.execute(query, tuple(p))
+    rows = cur.fetchall()
+    conn.close()
+
+    return [{
+        'id': r[0], 'referencia': r[1], 'producto_nombre': r[2],
+        'marca_nombre': r[3], 'marca_categoria': r[4], 'marca_clasificacion': r[5],
+        'stock_actual_red': safe_float(r[6]), 'venta_proyectada': safe_float(r[7]),
+        'cantidad_sugerida': safe_float(r[8]),
+        'dias_cobertura_actual': safe_float(r[9]), 'dias_cobertura_objetivo': safe_float(r[10]),
+        'costo_unitario_estimado': safe_float(r[11]), 'valor_compra_estimado': safe_float(r[12]),
+        'fecha_sugerida_pedido': r[13].isoformat() if r[13] else None,
+        'fecha_llegada_estimada': r[14].isoformat() if r[14] else None,
+        'prioridad': r[15], 'estado': r[16]
+    } for r in rows]
+
+
+# ============================================
+# ALMACENES
+# ============================================
+
+def get_almacenes(params):
+    regional = params.get('regional')
+    tipo = params.get('tipo', 'Venta')
+
+    conn = get_db()
+    cur = conn.cursor()
+    query = """
+        SELECT a.codigo, a.nombre, a.tipo, a.regional, a.es_cedi,
+               COUNT(DISTINCT m.referencia), COALESCE(SUM(m.stock_actual), 0),
+               COALESCE(SUM(m.valor_stock), 0),
+               AVG(m.dias_inventario) FILTER (WHERE m.dias_inventario < 9999)
         FROM almacenes a
-        LEFT JOIN metricas_producto_almacen m ON m.bodega_codigo = a.codigo 
+        LEFT JOIN metricas_producto_almacen m ON m.bodega_codigo = a.codigo
             AND m.fecha_calculo = CURRENT_DATE
-        WHERE a.tipo = 'Venta'
-        GROUP BY a.codigo, a.nombre, a.tipo, a.regional, a.es_cedi
-        ORDER BY 8 DESC NULLS LAST
-    """)
-    
+        WHERE a.activo = true
+    """
+    p = []
+    if tipo:
+        query += " AND a.tipo = %s"; p.append(tipo)
+    if regional:
+        query += " AND a.regional = %s"; p.append(regional)
+    query += " GROUP BY a.codigo, a.nombre, a.tipo, a.regional, a.es_cedi ORDER BY 8 DESC NULLS LAST"
+
+    cur.execute(query, tuple(p))
     rows = cur.fetchall()
     conn.close()
-    
-    almacenes = []
-    for row in rows:
-        almacenes.append({
-            'codigo': row[0],
-            'nombre': row[1],
-            'tipo': row[2],
-            'regional': row[3],
-            'es_cedi': row[4],
-            'productos': row[5],
-            'unidades': float(row[6]) if row[6] else 0,
-            'valor_inventario': float(row[7]) if row[7] else 0,
-            'dias_inv_promedio': float(row[8]) if row[8] else 0
-        })
-    
-    return almacenes
+
+    return [{
+        'codigo': r[0], 'nombre': r[1], 'tipo': r[2], 'regional': r[3],
+        'es_cedi': r[4], 'productos': r[5], 'unidades': safe_float(r[6]),
+        'valor_inventario': safe_float(r[7]), 'dias_inv_promedio': safe_float(r[8])
+    } for r in rows]
 
 
-def get_ventas_diarias():
-    """Ventas por día (últimos 30 días)"""
+# ============================================
+# VENTAS
+# ============================================
+
+def get_ventas_diarias(params):
+    regional = params.get('regional')
+    dias = int(params.get('dias', 30))
+    start = date.today() - timedelta(days=dias)
+
     conn = get_db()
     cur = conn.cursor()
-    
-    cur.execute("""
-        SELECT fecha, COUNT(*), COALESCE(SUM(cantidad), 0), COALESCE(SUM(valor_total), 0)
-        FROM ventas
-        WHERE fecha >= CURRENT_DATE - INTERVAL '30 days'
-        GROUP BY fecha
-        ORDER BY fecha
-    """)
-    
+    if regional:
+        cur.execute("""
+            SELECT v.fecha, COUNT(*), COALESCE(SUM(v.cantidad), 0), COALESCE(SUM(v.valor_total), 0)
+            FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
+            WHERE v.fecha >= %s AND a.regional = %s
+            GROUP BY v.fecha ORDER BY v.fecha
+        """, (start, regional))
+    else:
+        cur.execute("""
+            SELECT fecha, COUNT(*), COALESCE(SUM(cantidad), 0), COALESCE(SUM(valor_total), 0)
+            FROM ventas WHERE fecha >= %s GROUP BY fecha ORDER BY fecha
+        """, (start,))
+
     rows = cur.fetchall()
     conn.close()
-    
-    ventas = []
-    for row in rows:
-        ventas.append({
-            'fecha': row[0].isoformat(),
-            'transacciones': row[1],
-            'unidades': float(row[2]) if row[2] else 0,
-            'valor': float(row[3]) if row[3] else 0
-        })
-    
-    return ventas
+    return [{
+        'fecha': r[0].isoformat(), 'transacciones': r[1],
+        'unidades': safe_float(r[2]), 'valor': safe_float(r[3])
+    } for r in rows]
 
 
-def get_top_productos(limit=20):
-    """Top productos más vendidos"""
+def get_top_productos(params):
+    limit = int(params.get('limit', 20))
+    regional = params.get('regional')
+    d30 = date.today() - timedelta(days=30)
+
     conn = get_db()
     cur = conn.cursor()
-    
-    cur.execute("""
-        SELECT 
-            v.referencia, p.nombre,
-            COALESCE(SUM(v.cantidad), 0),
-            COALESCE(SUM(v.valor_total), 0),
-            COUNT(DISTINCT v.bodega_codigo)
-        FROM ventas v
-        LEFT JOIN productos p ON p.referencia = v.referencia
-        WHERE v.fecha >= CURRENT_DATE - INTERVAL '30 days'
-        GROUP BY v.referencia, p.nombre
-        ORDER BY 3 DESC
-        LIMIT %s
-    """, (limit,))
-    
+    if regional:
+        cur.execute("""
+            SELECT v.referencia, p.nombre, COALESCE(SUM(v.cantidad), 0),
+                   COALESCE(SUM(v.valor_total), 0), COUNT(DISTINCT v.bodega_codigo)
+            FROM ventas v
+            LEFT JOIN productos p ON p.referencia = v.referencia
+            JOIN almacenes a ON a.codigo = v.bodega_codigo
+            WHERE v.fecha >= %s AND a.regional = %s
+            GROUP BY v.referencia, p.nombre ORDER BY 3 DESC LIMIT %s
+        """, (d30, regional, limit))
+    else:
+        cur.execute("""
+            SELECT v.referencia, p.nombre, COALESCE(SUM(v.cantidad), 0),
+                   COALESCE(SUM(v.valor_total), 0), COUNT(DISTINCT v.bodega_codigo)
+            FROM ventas v LEFT JOIN productos p ON p.referencia = v.referencia
+            WHERE v.fecha >= %s GROUP BY v.referencia, p.nombre ORDER BY 3 DESC LIMIT %s
+        """, (d30, limit))
+
     rows = cur.fetchall()
     conn.close()
-    
-    productos = []
-    for row in rows:
-        productos.append({
-            'referencia': row[0],
-            'producto_nombre': row[1],
-            'unidades_vendidas': float(row[2]) if row[2] else 0,
-            'valor_vendido': float(row[3]) if row[3] else 0,
-            'almacenes_venta': row[4]
-        })
-    
-    return productos
+    return [{
+        'referencia': r[0], 'producto_nombre': r[1],
+        'unidades_vendidas': safe_float(r[2]), 'valor_vendido': safe_float(r[3]),
+        'almacenes_venta': r[4]
+    } for r in rows]
 
+
+# ============================================
+# PRODUCTOS (Búsqueda + Detalle)
+# ============================================
+
+def buscar_productos(params):
+    q = params.get('q', '')
+    limit = int(params.get('limit', 30))
+    if len(q) < 2:
+        return []
+
+    conn = get_db()
+    cur = conn.cursor()
+    pattern = f'%{q}%'
+    cur.execute("""
+        SELECT p.referencia, p.nombre, p.codigo, m.nombre,
+               COALESCE(SUM(ia.cantidad), 0), COUNT(DISTINCT ia.bodega_codigo) FILTER (WHERE ia.cantidad > 0)
+        FROM productos p
+        LEFT JOIN marcas m ON m.codigo = p.marca_codigo
+        LEFT JOIN inventario_actual ia ON ia.referencia = p.referencia
+        WHERE LOWER(p.nombre) LIKE LOWER(%s) OR LOWER(p.referencia) LIKE LOWER(%s)
+            OR LOWER(p.codigo) LIKE LOWER(%s)
+        GROUP BY p.referencia, p.nombre, p.codigo, m.nombre
+        ORDER BY 5 DESC LIMIT %s
+    """, (pattern, pattern, pattern, limit))
+
+    rows = cur.fetchall()
+    conn.close()
+    return [{
+        'referencia': r[0], 'nombre': r[1], 'codigo': r[2], 'marca': r[3],
+        'stock_total': safe_float(r[4]), 'almacenes_con_stock': r[5]
+    } for r in rows]
+
+
+def get_producto_detalle(params):
+    ref = params.get('ref', '')
+    if not ref:
+        return None
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT p.referencia, p.nombre, p.codigo, m.nombre, m.categoria,
+               m.clasificacion, m.dias_cobertura_stock
+        FROM productos p LEFT JOIN marcas m ON m.codigo = p.marca_codigo
+        WHERE p.referencia = %s
+    """, (ref,))
+    prod = cur.fetchone()
+    if not prod:
+        conn.close()
+        return None
+
+    cur.execute("""
+        SELECT ia.bodega_codigo, a.nombre, a.tipo, a.regional,
+               ia.cantidad, ia.valor_costo,
+               COALESCE(m.venta_diaria_promedio, 0), COALESCE(m.dias_inventario, 0),
+               COALESCE(m.estado_stock, 'SIN_DATOS')
+        FROM inventario_actual ia
+        JOIN almacenes a ON a.codigo = ia.bodega_codigo
+        LEFT JOIN metricas_producto_almacen m ON m.referencia = ia.referencia
+            AND m.bodega_codigo = ia.bodega_codigo AND m.fecha_calculo = CURRENT_DATE
+        WHERE ia.referencia = %s AND ia.cantidad > 0
+        ORDER BY ia.cantidad DESC
+    """, (ref,))
+    almacenes = cur.fetchall()
+
+    d30 = date.today() - timedelta(days=30)
+    cur.execute("""
+        SELECT fecha, SUM(cantidad), SUM(valor_total)
+        FROM ventas WHERE referencia = %s AND fecha >= %s
+        GROUP BY fecha ORDER BY fecha
+    """, (ref, d30))
+    ventas = cur.fetchall()
+    conn.close()
+
+    return {
+        'producto': {
+            'referencia': prod[0], 'nombre': prod[1], 'codigo': prod[2],
+            'marca': prod[3], 'categoria': prod[4], 'clasificacion': prod[5],
+            'dias_cobertura': prod[6]
+        },
+        'almacenes': [{
+            'codigo': r[0], 'nombre': r[1], 'tipo': r[2], 'regional': r[3],
+            'stock': safe_float(r[4]), 'valor_costo': safe_float(r[5]),
+            'venta_diaria': safe_float(r[6]), 'dias_inventario': safe_float(r[7]),
+            'estado': r[8]
+        } for r in almacenes],
+        'ventas_30d': [{
+            'fecha': r[0].isoformat(), 'cantidad': safe_float(r[1]), 'valor': safe_float(r[2])
+        } for r in ventas]
+    }
+
+
+# ============================================
+# REGIONALES
+# ============================================
+
+def get_regionales():
+    conn = get_db()
+    cur = conn.cursor()
+    d30 = date.today() - timedelta(days=30)
+
+    cur.execute("""
+        SELECT r.codigo, r.nombre,
+               COUNT(DISTINCT a.codigo) FILTER (WHERE a.tipo = 'Venta'),
+               COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
+        FROM regionales r
+        LEFT JOIN almacenes a ON a.regional = r.codigo
+        LEFT JOIN inventario_actual ia ON ia.bodega_codigo = a.codigo
+        WHERE r.activo = true
+        GROUP BY r.codigo, r.nombre
+        ORDER BY 4 DESC
+    """)
+    regiones = cur.fetchall()
+
+    result = []
+    for rg in regiones:
+        cur.execute("""
+            SELECT COALESCE(SUM(v.valor_total), 0)
+            FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
+            WHERE a.regional = %s AND v.fecha >= %s
+        """, (rg[0], d30))
+        ventas = safe_float(cur.fetchone()[0])
+
+        cur.execute("""
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE al.nivel = 'CRITICO')
+            FROM alertas al JOIN almacenes a ON a.codigo = al.bodega_codigo
+            WHERE a.regional = %s AND al.estado = 'PENDIENTE'
+        """, (rg[0],))
+        ar = cur.fetchone()
+
+        cur.execute("""
+            SELECT COUNT(*) FROM recomendaciones_traslado
+            WHERE regional_destino = %s AND estado = 'PENDIENTE'
+        """, (rg[0],))
+        traslados = cur.fetchone()[0]
+
+        result.append({
+            'codigo': rg[0], 'nombre': rg[1], 'almacenes_venta': rg[2],
+            'valor_inventario': safe_float(rg[3]), 'ventas_30d': ventas,
+            'alertas_pendientes': ar[0], 'alertas_criticas': ar[1],
+            'traslados_pendientes': traslados
+        })
+
+    conn.close()
+    return result
+
+
+# ============================================
+# EXPORTACIÓN CSV
+# ============================================
+
+def _csv_escape(val):
+    s = str(val).replace('"', '""')
+    return f'"{s}"'
+
+
+def export_csv(tipo, params):
+    params_copy = dict(params)
+    params_copy['limit'] = params.get('limit', '500')
+
+    if tipo == 'alertas':
+        data = get_alertas(params_copy)
+        headers = ['ID', 'Tipo', 'Nivel', 'Referencia', 'Producto', 'Almacén', 'Regional', 'Stock', 'Días Inv.', 'Venta Diaria', 'Estado', 'Fecha']
+        rows = [[d['id'], d['tipo_alerta'], d['nivel'], d['referencia'],
+                 d.get('producto_nombre', ''), d.get('almacen_nombre', ''), d.get('regional', ''),
+                 d['stock_actual'], d['dias_inventario'], d['venta_diaria'],
+                 d['estado'], d.get('fecha_generacion', '')] for d in data]
+    elif tipo == 'traslados':
+        data = get_traslados(params_copy)
+        headers = ['ID', 'Referencia', 'Producto', 'Origen', 'Destino', 'Regional', 'Cantidad', 'Días Origen', 'Días Destino', 'Prioridad', 'Estado']
+        rows = [[d['id'], d['referencia'], d.get('producto_nombre', ''),
+                 d.get('origen_nombre', ''), d.get('destino_nombre', ''), d.get('regional', ''),
+                 d['cantidad_sugerida'], d['dias_inv_origen'], d['dias_inv_destino'],
+                 d['prioridad'], d['estado']] for d in data]
+    elif tipo == 'compras':
+        data = get_compras(params_copy)
+        headers = ['ID', 'Referencia', 'Producto', 'Marca', 'Stock Red', 'Cant. Sugerida', 'Cobertura Actual', 'Cobertura Obj.', 'Valor Estimado', 'Prioridad']
+        rows = [[d['id'], d['referencia'], d.get('producto_nombre', ''),
+                 d.get('marca_nombre', ''), d['stock_actual_red'], d['cantidad_sugerida'],
+                 d['dias_cobertura_actual'], d['dias_cobertura_objetivo'],
+                 d['valor_compra_estimado'], d['prioridad']] for d in data]
+    elif tipo == 'almacenes':
+        data = get_almacenes(params_copy)
+        headers = ['Código', 'Nombre', 'Tipo', 'Regional', 'Productos', 'Unidades', 'Valor Inventario', 'Días Inv. Prom.']
+        rows = [[d['codigo'], d['nombre'], d['tipo'], d.get('regional', ''),
+                 d['productos'], d['unidades'], d['valor_inventario'],
+                 d['dias_inv_promedio']] for d in data]
+    else:
+        return api_response(400, {'error': f'Tipo de exportación no válido: {tipo}'})
+
+    csv_lines = [','.join(headers)]
+    for row in rows:
+        csv_lines.append(','.join([_csv_escape(c) for c in row]))
+
+    filename = f'stockiq_{tipo}_{date.today().strftime("%Y%m%d")}.csv'
+    return csv_response(filename, '\n'.join(csv_lines))
+
+
+# ============================================
+# HANDLER PRINCIPAL
+# ============================================
 
 def handler(event, context):
-    """Handler principal para API Gateway"""
-    
     if event.get('httpMethod') == 'OPTIONS':
-        return response(200, {})
-    
+        return api_response(200, {})
+
     path = event.get('path', '')
-    query_params = event.get('queryStringParameters') or {}
-    
+    method = event.get('httpMethod', 'GET')
+    params = event.get('queryStringParameters') or {}
+    body = event.get('body') or '{}'
+
+    # Ruta pública
+    if path == '/api/auth/login' and method == 'POST':
+        return login(body)
+
+    # Todas las demás rutas requieren autenticación
+    user = authenticate(event)
+    if not user:
+        return api_response(401, {'error': 'No autorizado. Inicia sesión.'})
+
     try:
+        # Auth
+        if path == '/api/auth/logout' and method == 'POST':
+            return logout(event)
+        if path == '/api/auth/me':
+            return api_response(200, user)
+
+        # Filtros
+        if path == '/api/filtros':
+            return api_response(200, get_filtros())
+
+        # KPIs
         if path == '/api/kpis':
-            return response(200, get_kpis())
-        
-        elif path == '/api/alertas':
-            limit = int(query_params.get('limit', 50))
-            tipo = query_params.get('tipo')
-            nivel = query_params.get('nivel')
-            return response(200, get_alertas(limit, tipo, nivel))
-        
-        elif path == '/api/traslados':
-            limit = int(query_params.get('limit', 50))
-            prioridad = query_params.get('prioridad')
-            return response(200, get_traslados(limit, prioridad))
-        
-        elif path == '/api/almacenes':
-            return response(200, get_almacenes())
-        
-        elif path == '/api/ventas/diarias':
-            return response(200, get_ventas_diarias())
-        
-        elif path == '/api/ventas/top-productos':
-            limit = int(query_params.get('limit', 20))
-            return response(200, get_top_productos(limit))
-        
-        else:
-            return response(404, {'error': 'Endpoint no encontrado'})
-    
+            return api_response(200, get_kpis(params))
+
+        # Alertas
+        if path == '/api/alertas' and method == 'GET':
+            return api_response(200, get_alertas(params))
+        if path == '/api/alertas/resumen':
+            return api_response(200, get_alertas_resumen())
+        if path.startswith('/api/alertas/') and path.endswith('/estado') and method == 'PATCH':
+            alerta_id = path.split('/')[3]
+            return update_alerta_estado(alerta_id, body, user)
+
+        # Traslados
+        if path == '/api/traslados' and method == 'GET':
+            return api_response(200, get_traslados(params))
+        if path.startswith('/api/traslados/') and path.endswith('/estado') and method == 'PATCH':
+            traslado_id = path.split('/')[3]
+            return update_traslado_estado(traslado_id, body, user)
+
+        # Compras
+        if path == '/api/compras':
+            return api_response(200, get_compras(params))
+
+        # Almacenes
+        if path == '/api/almacenes':
+            return api_response(200, get_almacenes(params))
+
+        # Ventas
+        if path == '/api/ventas/diarias':
+            return api_response(200, get_ventas_diarias(params))
+        if path == '/api/ventas/top-productos':
+            return api_response(200, get_top_productos(params))
+
+        # Productos
+        if path == '/api/productos/buscar':
+            return api_response(200, buscar_productos(params))
+        if path == '/api/productos/detalle':
+            detalle = get_producto_detalle(params)
+            if detalle:
+                return api_response(200, detalle)
+            return api_response(404, {'error': 'Producto no encontrado'})
+
+        # Regionales
+        if path == '/api/regionales':
+            return api_response(200, get_regionales())
+
+        # Export CSV
+        if path.startswith('/api/export/'):
+            tipo = path.split('/')[3]
+            return export_csv(tipo, params)
+
+        return api_response(404, {'error': 'Endpoint no encontrado'})
+
     except Exception as e:
         print(f"Error: {e}")
         import traceback
         traceback.print_exc()
-        return response(500, {'error': str(e)})
+        return api_response(500, {'error': str(e)})
