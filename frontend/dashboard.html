@@ -134,12 +134,15 @@
                 <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6"></div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h3 class="text-sm font-semibold text-gray-700 mb-4">Tendencia de Ventas (30 días)</h3>
-                        <canvas id="chart-ventas" height="200"></canvas>
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-sm font-semibold text-gray-700">Venta sobre Inventario (30 días)</h3>
+                            <span id="eficiencia-total" class="text-xs font-bold px-2 py-1 rounded bg-blue-50 text-blue-700"></span>
+                        </div>
+                        <div style="height:260px;position:relative"><canvas id="chart-ventas"></canvas></div>
                     </div>
                     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <h3 class="text-sm font-semibold text-gray-700 mb-4">Top Productos Vendidos</h3>
-                        <div id="top-productos-list"></div>
+                        <div id="top-productos-list" class="max-h-[280px] overflow-y-auto"></div>
                     </div>
                 </div>
             </div>
@@ -394,11 +397,11 @@ async function loadDashboard() {
     try {
         const r = getRegional();
         const qs = r ? `?regional=${r}` : '';
-        const [kpis, ventas, top] = await Promise.all([
-            api('/kpis' + qs), api('/ventas/diarias' + qs), api('/ventas/top-productos' + qs + (qs ? '&' : '?') + 'limit=10')
+        const [kpis, eficiencia, top] = await Promise.all([
+            api('/kpis' + qs), api('/ventas/eficiencia' + qs), api('/ventas/top-productos' + qs + (qs ? '&' : '?') + 'limit=10')
         ]);
         renderKPIs(kpis);
-        renderSalesChart(ventas);
+        renderEficienciaChart(eficiencia);
         renderTopProductos(top);
         document.getElementById('nav-count-alertas').textContent = kpis.alertas.total || '';
         document.getElementById('nav-count-traslados').textContent = kpis.traslados_pendientes || '';
@@ -450,26 +453,52 @@ function renderKPIs(k) {
     lucide.createIcons();
 }
 
-function renderSalesChart(data) {
+function renderEficienciaChart(resp) {
+    const data = resp.datos || [];
+    const invTotal = resp.valor_inventario_actual || 0;
+    const ventaTotal = data.reduce((s, d) => s + d.venta, 0);
+    const pctTotal = invTotal > 0 ? (ventaTotal / invTotal * 100).toFixed(1) : '0';
+    document.getElementById('eficiencia-total').textContent = `${pctTotal}% eficiencia 30d`;
+
     const ctx = document.getElementById('chart-ventas');
     if (salesChart) salesChart.destroy();
     salesChart = new Chart(ctx, {
-        type: 'line',
+        type: 'bar',
         data: {
             labels: data.map(d => { const dt = new Date(d.fecha + 'T12:00:00'); return dt.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }); }),
-            datasets: [{
-                label: 'Valor ventas',
-                data: data.map(d => d.valor),
-                borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,.08)',
-                fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2
-            }]
+            datasets: [
+                {
+                    label: 'Venta diaria',
+                    data: data.map(d => d.venta),
+                    backgroundColor: 'rgba(59,130,246,.5)',
+                    borderColor: '#3b82f6', borderWidth: 1, borderRadius: 3,
+                    yAxisID: 'y', order: 2
+                },
+                {
+                    label: '% Venta/Inventario',
+                    data: data.map(d => d.eficiencia),
+                    borderColor: '#f59e0b', backgroundColor: 'transparent',
+                    type: 'line', tension: 0.3, pointRadius: 2, borderWidth: 2,
+                    yAxisID: 'y1', order: 1
+                }
+            ]
         },
         options: {
             responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            plugins: {
+                legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } }
+            },
             scales: {
-                y: { ticks: { callback: v => formatCurrency(v) }, grid: { color: '#f3f4f6' } },
-                x: { grid: { display: false }, ticks: { maxTicksLimit: 10 } }
+                y: {
+                    position: 'left', ticks: { callback: v => formatCurrency(v), font: { size: 10 } },
+                    grid: { color: '#f3f4f6' }, title: { display: false }
+                },
+                y1: {
+                    position: 'right', min: 0,
+                    ticks: { callback: v => v.toFixed(2) + '%', font: { size: 10 } },
+                    grid: { display: false }, title: { display: false }
+                },
+                x: { grid: { display: false }, ticks: { maxTicksLimit: 10, font: { size: 10 } } }
             }
         }
     });

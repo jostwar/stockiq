@@ -437,40 +437,137 @@ def get_compras(params):
 
     conn = get_db()
     cur = conn.cursor()
-    query = """
-        SELECT rc.id, rc.referencia, p.nombre, m.nombre, rc.marca_categoria,
-               rc.marca_clasificacion, rc.stock_actual_red, rc.venta_proyectada,
-               rc.cantidad_sugerida, rc.dias_cobertura_actual, rc.dias_cobertura_objetivo,
-               rc.costo_unitario_estimado, rc.valor_compra_estimado,
-               rc.fecha_sugerida_pedido, rc.fecha_llegada_estimada, rc.prioridad, rc.estado
-        FROM recomendaciones_compra rc
-        LEFT JOIN productos p ON p.referencia = rc.referencia
-        LEFT JOIN marcas m ON m.codigo = rc.marca_codigo
-        WHERE rc.estado = 'PENDIENTE'
-    """
-    p = []
-    if prioridad:
-        query += " AND rc.prioridad = %s"; p.append(prioridad)
-    if marca:
-        query += " AND rc.marca_codigo = %s"; p.append(marca)
-    query += " ORDER BY rc.prioridad ASC, rc.dias_cobertura_actual ASC LIMIT %s"
-    p.append(limit)
 
-    cur.execute(query, tuple(p))
+    # Verificar si hay datos pre-computados
+    cur.execute("SELECT COUNT(*) FROM recomendaciones_compra WHERE estado = 'PENDIENTE'")
+    precomputed = cur.fetchone()[0]
+
+    if precomputed > 0:
+        query = """
+            SELECT rc.id, rc.referencia, p.nombre, m.nombre, rc.marca_categoria,
+                   rc.marca_clasificacion, rc.stock_actual_red, rc.venta_proyectada,
+                   rc.cantidad_sugerida, rc.dias_cobertura_actual, rc.dias_cobertura_objetivo,
+                   rc.costo_unitario_estimado, rc.valor_compra_estimado,
+                   rc.fecha_sugerida_pedido, rc.fecha_llegada_estimada, rc.prioridad, rc.estado
+            FROM recomendaciones_compra rc
+            LEFT JOIN productos p ON p.referencia = rc.referencia
+            LEFT JOIN marcas m ON m.codigo = rc.marca_codigo
+            WHERE rc.estado = 'PENDIENTE'
+        """
+        p = []
+        if prioridad:
+            query += " AND rc.prioridad = %s"; p.append(prioridad)
+        if marca:
+            query += " AND rc.marca_codigo = %s"; p.append(marca)
+        query += " ORDER BY rc.prioridad ASC, rc.dias_cobertura_actual ASC LIMIT %s"
+        p.append(limit)
+        cur.execute(query, tuple(p))
+        rows = cur.fetchall()
+        conn.close()
+        return [{
+            'id': r[0], 'referencia': r[1], 'producto_nombre': r[2],
+            'marca_nombre': r[3], 'marca_categoria': r[4], 'marca_clasificacion': r[5],
+            'stock_actual_red': safe_float(r[6]), 'venta_proyectada': safe_float(r[7]),
+            'cantidad_sugerida': safe_float(r[8]),
+            'dias_cobertura_actual': safe_float(r[9]), 'dias_cobertura_objetivo': safe_float(r[10]),
+            'costo_unitario_estimado': safe_float(r[11]), 'valor_compra_estimado': safe_float(r[12]),
+            'fecha_sugerida_pedido': r[13].isoformat() if r[13] else None,
+            'fecha_llegada_estimada': r[14].isoformat() if r[14] else None,
+            'prioridad': r[15], 'estado': r[16]
+        } for r in rows]
+
+    # Cálculo en tiempo real: productos con venta pero stock insuficiente
+    return _compras_live(conn, cur, limit, prioridad, marca)
+
+
+def _compras_live(conn, cur, limit, prioridad_filter, marca_filter):
+    """Calcula recomendaciones de compra en tiempo real"""
+    d30 = date.today() - timedelta(days=30)
+
+    query = """
+        WITH venta_red AS (
+            SELECT v.referencia, SUM(v.cantidad) as venta_30d,
+                   SUM(v.cantidad) / 30.0 as venta_diaria
+            FROM ventas v
+            JOIN almacenes a ON a.codigo = v.bodega_codigo AND a.tipo = 'Venta'
+            WHERE v.fecha >= %s
+            GROUP BY v.referencia
+            HAVING SUM(v.cantidad) > 0
+        ),
+        stock_red AS (
+            SELECT referencia, SUM(cantidad) as stock_total,
+                   AVG(NULLIF(valor_costo, 0)) as costo_prom
+            FROM inventario_actual WHERE cantidad > 0
+            GROUP BY referencia
+        )
+        SELECT
+            0 as id, p.referencia, p.nombre, m.nombre as marca,
+            m.categoria, m.clasificacion,
+            COALESCE(sr.stock_total, 0) as stock_red,
+            vr.venta_30d as venta_proyectada,
+            GREATEST(
+                CEIL((COALESCE(m.dias_cobertura_stock, 30) + COALESCE(m.lead_time_a_cedi, 15))
+                     * vr.venta_diaria - COALESCE(sr.stock_total, 0)),
+                0
+            ) as cant_sugerida,
+            CASE WHEN vr.venta_diaria > 0
+                 THEN ROUND(COALESCE(sr.stock_total, 0) / vr.venta_diaria, 1)
+                 ELSE 0 END as dias_cob_actual,
+            COALESCE(m.dias_cobertura_stock, 30) as dias_cob_obj,
+            COALESCE(sr.costo_prom, 0) as costo_unit,
+            GREATEST(
+                CEIL((COALESCE(m.dias_cobertura_stock, 30) + COALESCE(m.lead_time_a_cedi, 15))
+                     * vr.venta_diaria - COALESCE(sr.stock_total, 0)),
+                0
+            ) * COALESCE(sr.costo_prom, 0) as valor_est,
+            CASE
+                WHEN COALESCE(sr.stock_total, 0) = 0 THEN 'URGENTE'
+                WHEN vr.venta_diaria > 0 AND COALESCE(sr.stock_total,0) / vr.venta_diaria < COALESCE(m.lead_time_a_cedi, 15) THEN 'URGENTE'
+                WHEN vr.venta_diaria > 0 AND COALESCE(sr.stock_total,0) / vr.venta_diaria < COALESCE(m.lead_time_a_cedi, 15) + 7 THEN 'ALTA'
+                WHEN vr.venta_diaria > 0 AND COALESCE(sr.stock_total,0) / vr.venta_diaria < COALESCE(m.dias_cobertura_stock, 30) THEN 'MEDIA'
+                ELSE 'BAJA'
+            END as prioridad
+        FROM venta_red vr
+        JOIN productos p ON p.referencia = vr.referencia
+        LEFT JOIN marcas m ON m.codigo = p.marca_codigo
+        LEFT JOIN stock_red sr ON sr.referencia = vr.referencia
+        WHERE COALESCE(sr.stock_total, 0) <
+              (COALESCE(m.dias_cobertura_stock, 30) + COALESCE(m.lead_time_a_cedi, 15)) * vr.venta_diaria
+    """
+    params = [d30]
+    if marca_filter:
+        query += " AND m.codigo = %s"
+        params.append(marca_filter)
+
+    query += """ ORDER BY
+        CASE WHEN COALESCE(sr.stock_total, 0) = 0 THEN 0 ELSE 1 END,
+        CASE WHEN m.categoria = 'PRINCIPAL' THEN 0 ELSE 1 END,
+        CASE WHEN m.clasificacion = 'A' THEN 1 WHEN m.clasificacion = 'B' THEN 2
+             WHEN m.clasificacion = 'C' THEN 3 ELSE 4 END,
+        dias_cob_actual ASC
+        LIMIT %s
+    """
+    params.append(limit)
+
+    cur.execute(query, tuple(params))
     rows = cur.fetchall()
     conn.close()
 
-    return [{
+    results = [{
         'id': r[0], 'referencia': r[1], 'producto_nombre': r[2],
         'marca_nombre': r[3], 'marca_categoria': r[4], 'marca_clasificacion': r[5],
         'stock_actual_red': safe_float(r[6]), 'venta_proyectada': safe_float(r[7]),
         'cantidad_sugerida': safe_float(r[8]),
         'dias_cobertura_actual': safe_float(r[9]), 'dias_cobertura_objetivo': safe_float(r[10]),
         'costo_unitario_estimado': safe_float(r[11]), 'valor_compra_estimado': safe_float(r[12]),
-        'fecha_sugerida_pedido': r[13].isoformat() if r[13] else None,
-        'fecha_llegada_estimada': r[14].isoformat() if r[14] else None,
-        'prioridad': r[15], 'estado': r[16]
+        'fecha_sugerida_pedido': None, 'fecha_llegada_estimada': None,
+        'prioridad': r[13], 'estado': 'CALCULADO'
     } for r in rows]
+
+    if prioridad_filter:
+        results = [r for r in results if r['prioridad'] == prioridad_filter]
+
+    return results
 
 
 # ============================================
@@ -541,6 +638,75 @@ def get_ventas_diarias(params):
         'fecha': r[0].isoformat(), 'transacciones': r[1],
         'unidades': safe_float(r[2]), 'valor': safe_float(r[3])
     } for r in rows]
+
+
+def get_eficiencia_diaria(params):
+    """Ventas diarias vs valor inventario para gráfica de eficiencia"""
+    regional = params.get('regional')
+    d30 = date.today() - timedelta(days=30)
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Valor inventario actual (denominador constante)
+    if regional:
+        cur.execute("""
+            SELECT COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
+            FROM inventario_actual ia
+            JOIN almacenes a ON a.codigo = ia.bodega_codigo
+            WHERE a.regional = %s
+        """, (regional,))
+    else:
+        cur.execute("SELECT COALESCE(SUM(cantidad * valor_costo), 0) FROM inventario_actual")
+    valor_inventario = safe_float(cur.fetchone()[0])
+
+    # Ventas diarias
+    if regional:
+        cur.execute("""
+            SELECT v.fecha, COALESCE(SUM(v.valor_total), 0)
+            FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
+            WHERE v.fecha >= %s AND a.regional = %s
+            GROUP BY v.fecha ORDER BY v.fecha
+        """, (d30, regional))
+    else:
+        cur.execute("""
+            SELECT fecha, COALESCE(SUM(valor_total), 0)
+            FROM ventas WHERE fecha >= %s GROUP BY fecha ORDER BY fecha
+        """, (d30,))
+
+    rows = cur.fetchall()
+
+    # Snapshots de inventario (si existen, para valor histórico real)
+    if regional:
+        cur.execute("""
+            SELECT s.fecha_snapshot, COALESCE(SUM(s.cantidad * s.valor_costo), 0)
+            FROM inventario_snapshot s
+            JOIN almacenes a ON a.codigo = s.bodega_codigo
+            WHERE s.fecha_snapshot >= %s AND a.regional = %s
+            GROUP BY s.fecha_snapshot ORDER BY s.fecha_snapshot
+        """, (d30, regional))
+    else:
+        cur.execute("""
+            SELECT fecha_snapshot, COALESCE(SUM(cantidad * valor_costo), 0)
+            FROM inventario_snapshot WHERE fecha_snapshot >= %s
+            GROUP BY fecha_snapshot ORDER BY fecha_snapshot
+        """, (d30,))
+    snapshots = {r[0].isoformat(): safe_float(r[1]) for r in cur.fetchall()}
+
+    conn.close()
+
+    result = []
+    for r in rows:
+        fecha_str = r[0].isoformat()
+        venta = safe_float(r[1])
+        inv = snapshots.get(fecha_str, valor_inventario)
+        eficiencia = round((venta / inv * 100), 4) if inv > 0 else 0
+        result.append({
+            'fecha': fecha_str, 'venta': venta, 'inventario': inv,
+            'eficiencia': eficiencia
+        })
+
+    return {'datos': result, 'valor_inventario_actual': valor_inventario}
 
 
 def get_top_productos(params):
@@ -843,6 +1009,8 @@ def handler(event, context):
             return api_response(200, get_ventas_diarias(params))
         if path == '/api/ventas/top-productos':
             return api_response(200, get_top_productos(params))
+        if path == '/api/ventas/eficiencia':
+            return api_response(200, get_eficiencia_diaria(params))
 
         # Productos
         if path == '/api/productos/buscar':
