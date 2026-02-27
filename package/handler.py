@@ -570,9 +570,21 @@ def _compras_live(conn, cur, limit, prioridad_filter, marca_filter):
             HAVING SUM(v.cantidad) > 0
         ),
         stock_red AS (
-            SELECT referencia, SUM(cantidad) as stock_total,
-                   AVG(NULLIF(valor_costo, 0)) as costo_prom
-            FROM inventario_actual WHERE cantidad > 0
+            SELECT referencia, SUM(cantidad) as stock_total
+            FROM inventario_actual
+            GROUP BY referencia
+        ),
+        costo_ref AS (
+            SELECT referencia, AVG(NULLIF(valor_costo, 0)) as costo_prom
+            FROM inventario_actual
+            WHERE valor_costo > 0
+            GROUP BY referencia
+        ),
+        costo_venta AS (
+            SELECT referencia,
+                   ROUND(SUM(valor_total) / NULLIF(SUM(cantidad), 0)) as costo_aprox
+            FROM ventas
+            WHERE fecha >= %s AND cantidad > 0
             GROUP BY referencia
         )
         SELECT
@@ -589,12 +601,12 @@ def _compras_live(conn, cur, limit, prioridad_filter, marca_filter):
                  THEN ROUND(COALESCE(sr.stock_total, 0) / vr.venta_diaria, 1)
                  ELSE 0 END as dias_cob_actual,
             COALESCE(m.dias_cobertura_stock, 30) as dias_cob_obj,
-            COALESCE(sr.costo_prom, 0) as costo_unit,
+            COALESCE(cr.costo_prom, cv.costo_aprox, 0) as costo_unit,
             GREATEST(
                 CEIL((COALESCE(m.dias_cobertura_stock, 30) + COALESCE(m.lead_time_a_cedi, 15))
                      * vr.venta_diaria - COALESCE(sr.stock_total, 0)),
                 0
-            ) * COALESCE(sr.costo_prom, 0) as valor_est,
+            ) * COALESCE(cr.costo_prom, cv.costo_aprox, 0) as valor_est,
             CASE
                 WHEN COALESCE(sr.stock_total, 0) = 0 THEN 'URGENTE'
                 WHEN vr.venta_diaria > 0 AND COALESCE(sr.stock_total,0) / vr.venta_diaria < COALESCE(m.lead_time_a_cedi, 15) THEN 'URGENTE'
@@ -606,10 +618,12 @@ def _compras_live(conn, cur, limit, prioridad_filter, marca_filter):
         JOIN productos p ON p.referencia = vr.referencia
         LEFT JOIN marcas m ON m.codigo = p.marca_codigo
         LEFT JOIN stock_red sr ON sr.referencia = vr.referencia
+        LEFT JOIN costo_ref cr ON cr.referencia = vr.referencia
+        LEFT JOIN costo_venta cv ON cv.referencia = vr.referencia
         WHERE COALESCE(sr.stock_total, 0) <
               (COALESCE(m.dias_cobertura_stock, 30) + COALESCE(m.lead_time_a_cedi, 15)) * vr.venta_diaria
     """
-    params = [d30]
+    params = [d30, d30]
     if marca_filter:
         query += " AND m.codigo = %s"
         params.append(marca_filter)
