@@ -138,7 +138,7 @@
             <!-- ===== DASHBOARD ===== -->
             <div id="page-dashboard" class="page active">
                 <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6"></div>
-                <div id="salud-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div>
+                <div id="salud-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6"></div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <div class="flex items-center justify-between mb-4">
@@ -499,7 +499,38 @@ function renderSaludCards(s) {
         { key: 'bajo', label: 'Stock Bajo', desc: 'Por debajo del mínimo', icon: 'alert-triangle', color: 'yellow', bg: 'yellow' },
         { key: 'sobreinventario', label: 'Sobreinventario', desc: 'Exceso sin rotación', icon: 'archive', color: 'orange', bg: 'orange' }
     ];
-    document.getElementById('salud-cards').innerHTML = cats.map(c => {
+    const sinClasificar = s.total_items - (s.sano.items + s.critico.items + s.bajo.items + s.sobreinventario.items);
+    const sinClasificarVal = s.total_valor - (s.sano.valor + s.critico.valor + s.bajo.valor + s.sobreinventario.valor);
+    const sinClasificarPct = s.total_valor > 0 ? (sinClasificarVal / s.total_valor * 100).toFixed(1) : 0;
+
+    const totalCard = `
+        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-sm p-4 text-white">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="p-2 rounded-lg bg-white/10"><i data-lucide="boxes" class="w-4 h-4 text-white"></i></div>
+                <div>
+                    <p class="text-xs font-semibold">Total Inventario</p>
+                    <p class="text-[10px] text-slate-400">Todos los tipos</p>
+                </div>
+            </div>
+            <div class="flex items-end justify-between">
+                <div>
+                    <p class="text-lg font-bold">${formatNumber(s.total_items)}</p>
+                    <p class="text-[10px] text-slate-400">producto-almacén</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm font-bold">${formatCurrency(s.total_valor)}</p>
+                    <p class="text-[10px] text-slate-400">Sin clasificar: ${formatNumber(sinClasificar)} (${sinClasificarPct}%)</p>
+                </div>
+            </div>
+            <div class="mt-2 w-full h-1.5 bg-slate-700 rounded-full overflow-hidden flex">
+                <div class="h-full bg-emerald-500" style="width:${s.sano.pct}%" title="Sano ${s.sano.pct}%"></div>
+                <div class="h-full bg-red-500" style="width:${s.critico.pct}%" title="Crítico ${s.critico.pct}%"></div>
+                <div class="h-full bg-yellow-500" style="width:${s.bajo.pct}%" title="Bajo ${s.bajo.pct}%"></div>
+                <div class="h-full bg-orange-500" style="width:${s.sobreinventario.pct}%" title="Sobre ${s.sobreinventario.pct}%"></div>
+            </div>
+        </div>`;
+
+    const catCards = cats.map(c => {
         const d = s[c.key] || { items: 0, valor: 0, pct: 0 };
         return `
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -525,6 +556,8 @@ function renderSaludCards(s) {
             </div>
         </div>`;
     }).join('');
+
+    document.getElementById('salud-cards').innerHTML = totalCard + catCards;
     lucide.createIcons();
 }
 
