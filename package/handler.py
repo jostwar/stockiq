@@ -1135,16 +1135,29 @@ def get_analisis_inventario(params):
     cur.execute(q, tuple(p))
     rows = cur.fetchall()
 
-    # Ventas 30d por marca
-    d30 = date.today() - timedelta(days=30)
+    # Ventas por marca con rango de fechas configurable
+    fecha_desde_str = params.get('fecha_desde')
+    fecha_hasta_str = params.get('fecha_hasta')
+    if fecha_desde_str:
+        try: fecha_desde = date.fromisoformat(fecha_desde_str)
+        except: fecha_desde = date.today() - timedelta(days=30)
+    else:
+        fecha_desde = date.today() - timedelta(days=30)
+    if fecha_hasta_str:
+        try: fecha_hasta = date.fromisoformat(fecha_hasta_str)
+        except: fecha_hasta = date.today()
+    else:
+        fecha_hasta = date.today()
+    dias_rango = max((fecha_hasta - fecha_desde).days, 1)
+
     vq = """
         SELECT p.marca_codigo, COALESCE(SUM(v.cantidad), 0), COALESCE(SUM(v.valor_total), 0)
         FROM ventas v
         JOIN almacenes a ON a.codigo = v.bodega_codigo AND a.tipo = 'Venta'
         JOIN productos p ON p.referencia = v.referencia
-        WHERE v.fecha >= %s
+        WHERE v.fecha >= %s AND v.fecha <= %s
     """
-    vp = [d30]
+    vp = [fecha_desde, fecha_hasta]
     if regional:
         vq += " AND a.regional = %s"; vp.append(regional)
     vq += " GROUP BY p.marca_codigo"
@@ -1168,12 +1181,14 @@ def get_analisis_inventario(params):
             'unidades': unidades, 'valor': valor,
             'pct_unidades': round(unidades / total_unidades * 100, 2) if total_unidades > 0 else 0,
             'pct_valor': round(valor / total_valor * 100, 2) if total_valor > 0 else 0,
-            'venta_30d_unidades': vta['unidades'], 'venta_30d_valor': vta['valor'],
+            'venta_periodo_unidades': vta['unidades'], 'venta_periodo_valor': vta['valor'],
             'rotacion_pct': round(rotacion, 2)
         })
 
     return {
         'total_unidades': total_unidades, 'total_valor': total_valor,
+        'fecha_desde': fecha_desde.isoformat(), 'fecha_hasta': fecha_hasta.isoformat(),
+        'dias_rango': dias_rango,
         'total_marcas': len(marcas), 'marcas': marcas
     }
 
