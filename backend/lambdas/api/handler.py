@@ -960,6 +960,9 @@ def get_regionales():
     cur = conn.cursor()
     d30 = date.today() - timedelta(days=30)
 
+    cur.execute("SELECT COALESCE(SUM(cantidad * valor_costo), 0) FROM inventario_actual")
+    inventario_total = safe_float(cur.fetchone()[0])
+
     cur.execute("""
         SELECT r.codigo, r.nombre,
                COUNT(DISTINCT a.codigo) FILTER (WHERE a.tipo = 'Venta'),
@@ -996,15 +999,17 @@ def get_regionales():
         """, (rg[0],))
         traslados = cur.fetchone()[0]
 
+        valor_inv = safe_float(rg[3])
         result.append({
             'codigo': rg[0], 'nombre': rg[1], 'almacenes_venta': rg[2],
-            'valor_inventario': safe_float(rg[3]), 'ventas_30d': ventas,
+            'valor_inventario': valor_inv, 'ventas_30d': ventas,
+            'pct_inventario': round(valor_inv / inventario_total * 100, 1) if inventario_total > 0 else 0,
             'alertas_pendientes': ar[0], 'alertas_criticas': ar[1],
             'traslados_pendientes': traslados
         })
 
     conn.close()
-    return result
+    return {'inventario_total': inventario_total, 'regionales': result}
 
 
 # ============================================
@@ -1017,6 +1022,9 @@ def get_almacenes_resumen(params):
     conn = get_db()
     cur = conn.cursor()
     d30 = date.today() - timedelta(days=30)
+
+    cur.execute("SELECT COALESCE(SUM(cantidad * valor_costo), 0) FROM inventario_actual")
+    inventario_total = safe_float(cur.fetchone()[0])
 
     q = """
         SELECT a.codigo, a.nombre, a.tipo, a.regional, a.es_cedi,
@@ -1062,6 +1070,7 @@ def get_almacenes_resumen(params):
         result.append({
             'codigo': cod, 'nombre': a[1], 'tipo': a[2], 'regional': a[3], 'es_cedi': a[4],
             'productos': a[5], 'unidades': safe_float(a[6]), 'valor_inventario': valor_inv,
+            'pct_inventario': round(valor_inv / inventario_total * 100, 1) if inventario_total > 0 else 0,
             'ventas_30d_unidades': safe_float(vr[0]), 'ventas_30d_valor': ventas_val,
             'alertas_total': ar[0], 'alertas_criticas': ar[1],
             'stock_critico': ar[2], 'stock_bajo': ar[3], 'sobreinventario': ar[4],
@@ -1069,7 +1078,7 @@ def get_almacenes_resumen(params):
         })
 
     conn.close()
-    return result
+    return {'inventario_total': inventario_total, 'almacenes': result}
 
 
 # ============================================
