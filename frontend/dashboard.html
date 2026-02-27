@@ -853,7 +853,7 @@ function renderRegionales(data) {
 // ============================================
 // EXPORT
 // ============================================
-function exportData(tipo) {
+async function exportData(tipo) {
     const regional = getRegional();
     let qs = `?limit=1000`;
     if (regional) qs += `&regional=${regional}`;
@@ -869,7 +869,21 @@ function exportData(tipo) {
         const p = document.getElementById('filtro-traslado-prioridad').value;
         if (p) qs += `&prioridad=${p}`;
     }
-    window.open(API_URL + `/export/${tipo}${qs}`, '_blank');
+    try {
+        const res = await fetch(API_URL + `/export/${tipo}${qs}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Error al exportar');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `stockiq_${tipo}_${new Date().toISOString().slice(0,10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (e) { alert('Error exportando: ' + e.message); }
 }
 
 // ============================================
