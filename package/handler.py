@@ -270,10 +270,81 @@ def get_kpis(params):
     r = cur.fetchone()
     compras = {'total': r[0], 'valor_estimado': safe_float(r[1])}
 
+    # Salud del inventario: desglose por tipo con valor y % sobre total
+    salud_join = """
+        FROM inventario_actual ia
+        JOIN almacenes a ON a.codigo = ia.bodega_codigo AND a.tipo = 'Venta'
+    """
+    salud_where = []
+    salud_params = []
+    if regional:
+        salud_where.append("a.regional = %s"); salud_params.append(regional)
+    if marca:
+        salud_join += " JOIN productos p ON p.referencia = ia.referencia"
+        salud_where.append("p.marca_codigo = %s"); salud_params.append(marca)
+    salud_base = salud_join + (" WHERE " + " AND ".join(salud_where) if salud_where else "")
+
+    # Total items (producto-almacen) y valor
+    cur.execute(f"SELECT COUNT(*), COALESCE(SUM(ia.cantidad * ia.valor_costo), 0) {salud_base} AND ia.cantidad > 0" if salud_where else
+                f"SELECT COUNT(*), COALESCE(SUM(ia.cantidad * ia.valor_costo), 0) {salud_base} WHERE ia.cantidad > 0",
+                tuple(salud_params))
+    sr = cur.fetchone()
+    total_items = sr[0]
+    total_valor_salud = safe_float(sr[1])
+
+    # Items con alerta pendiente por tipo
+    for tipo_al in ['STOCK_CRITICO', 'STOCK_BAJO', 'SOBREINVENTARIO']:
+        alert_q = f"""
+            SELECT COUNT(DISTINCT (ia.referencia, ia.bodega_codigo)),
+                   COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
+            {salud_join}
+            JOIN alertas al ON al.referencia = ia.referencia AND al.bodega_codigo = ia.bodega_codigo
+                AND al.tipo_alerta = %s AND al.estado = 'PENDIENTE'
+        """
+        ap = [tipo_al] + salud_params
+        if salud_where:
+            alert_q += " WHERE " + " AND ".join(salud_where)
+        cur.execute(alert_q, tuple(ap))
+        ar = cur.fetchone()
+        alertas[f'{tipo_al.lower()}_items'] = ar[0]
+        alertas[f'{tipo_al.lower()}_valor'] = safe_float(ar[1])
+
+    # Stock sano: items con venta en 30d y SIN alerta pendiente
+    sano_q = f"""
+        SELECT COUNT(DISTINCT (ia.referencia, ia.bodega_codigo)),
+               COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
+        {salud_join}
+        JOIN ventas v ON v.referencia = ia.referencia AND v.bodega_codigo = ia.bodega_codigo AND v.fecha >= %s
+    """
+    sano_params = [d30] + salud_params
+    sano_conds = list(salud_where) + ["""
+        NOT EXISTS (
+            SELECT 1 FROM alertas al2
+            WHERE al2.referencia = ia.referencia AND al2.bodega_codigo = ia.bodega_codigo
+            AND al2.estado = 'PENDIENTE'
+        )
+    """, "ia.cantidad > 0"]
+    sano_q += " WHERE " + " AND ".join(sano_conds)
+    cur.execute(sano_q, tuple(sano_params))
+    sano_r = cur.fetchone()
+    salud = {
+        'total_items': total_items,
+        'total_valor': total_valor_salud,
+        'critico': {'items': alertas['stock_critico_items'], 'valor': alertas['stock_critico_valor'],
+                    'pct': round(alertas['stock_critico_valor'] / total_valor_salud * 100, 1) if total_valor_salud > 0 else 0},
+        'bajo': {'items': alertas['stock_bajo_items'], 'valor': alertas['stock_bajo_valor'],
+                 'pct': round(alertas['stock_bajo_valor'] / total_valor_salud * 100, 1) if total_valor_salud > 0 else 0},
+        'sobreinventario': {'items': alertas['sobreinventario_items'], 'valor': alertas['sobreinventario_valor'],
+                            'pct': round(alertas['sobreinventario_valor'] / total_valor_salud * 100, 1) if total_valor_salud > 0 else 0},
+        'sano': {'items': sano_r[0], 'valor': safe_float(sano_r[1]),
+                 'pct': round(safe_float(sano_r[1]) / total_valor_salud * 100, 1) if total_valor_salud > 0 else 0}
+    }
+
     conn.close()
     return {
         'inventario': inventario, 'ventas_30d': ventas, 'alertas': alertas,
-        'traslados_pendientes': traslados_pendientes, 'compras': compras
+        'traslados_pendientes': traslados_pendientes, 'compras': compras,
+        'salud_inventario': salud
     }
 
 

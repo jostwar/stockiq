@@ -138,6 +138,7 @@
             <!-- ===== DASHBOARD ===== -->
             <div id="page-dashboard" class="page active">
                 <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6"></div>
+                <div id="salud-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <div class="flex items-center justify-between mb-4">
@@ -437,6 +438,7 @@ async function loadDashboard() {
             api('/kpis' + qs), api('/ventas/eficiencia' + qs), api('/ventas/top-productos' + qs + 'limit=10')
         ]);
         renderKPIs(kpis);
+        renderSaludCards(kpis.salud_inventario);
         renderEficienciaChart(eficiencia);
         renderTopProductos(top);
         document.getElementById('nav-count-alertas').textContent = kpis.alertas.total || '';
@@ -486,6 +488,43 @@ function renderKPIs(k) {
                 <div class="p-2.5 rounded-lg bg-orange-50"><i data-lucide="shopping-cart" class="w-5 h-5 text-orange-600"></i></div>
             </div>
         </div>`;
+    lucide.createIcons();
+}
+
+function renderSaludCards(s) {
+    if (!s) { document.getElementById('salud-cards').innerHTML = ''; return; }
+    const cats = [
+        { key: 'sano', label: 'Stock Sano', desc: 'Con ventas, sin alertas', icon: 'check-circle', color: 'emerald', bg: 'emerald' },
+        { key: 'critico', label: 'Stock Crítico', desc: 'En riesgo de agotarse', icon: 'alert-octagon', color: 'red', bg: 'red' },
+        { key: 'bajo', label: 'Stock Bajo', desc: 'Por debajo del mínimo', icon: 'alert-triangle', color: 'yellow', bg: 'yellow' },
+        { key: 'sobreinventario', label: 'Sobreinventario', desc: 'Exceso sin rotación', icon: 'archive', color: 'orange', bg: 'orange' }
+    ];
+    document.getElementById('salud-cards').innerHTML = cats.map(c => {
+        const d = s[c.key] || { items: 0, valor: 0, pct: 0 };
+        return `
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="p-2 rounded-lg bg-${c.bg}-50"><i data-lucide="${c.icon}" class="w-4 h-4 text-${c.color}-600"></i></div>
+                <div>
+                    <p class="text-xs font-semibold text-gray-700">${c.label}</p>
+                    <p class="text-[10px] text-gray-400">${c.desc}</p>
+                </div>
+            </div>
+            <div class="flex items-end justify-between">
+                <div>
+                    <p class="text-lg font-bold text-${c.color}-600">${formatNumber(d.items)}</p>
+                    <p class="text-[10px] text-gray-400">producto-almacén</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm font-bold text-${c.color}-600">${d.pct}%</p>
+                    <p class="text-[10px] text-gray-400">${formatCurrency(d.valor)}</p>
+                </div>
+            </div>
+            <div class="mt-2 w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div class="h-full bg-${c.color}-500 rounded-full transition-all" style="width:${Math.min(d.pct, 100)}%"></div>
+            </div>
+        </div>`;
+    }).join('');
     lucide.createIcons();
 }
 
