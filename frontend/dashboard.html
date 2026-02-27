@@ -17,6 +17,7 @@
         .badge-alto{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}
         .badge-medio{background:#fefce8;color:#ca8a04;border:1px solid #fef08a}
         .badge-bajo{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}
+        .badge-stock_agotado{background:#fff1f2;color:#e11d48;border:1px solid #fecdd3}
         .badge-urgente{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
         .badge-alta{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}
         .badge-media{background:#fefce8;color:#ca8a04;border:1px solid #fef08a}
@@ -96,6 +97,12 @@
             <a onclick="showPage('regionales')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="regionales">
                 <i data-lucide="map-pin" class="w-4 h-4"></i>Regionales
             </a>
+            <div id="nav-admin-section" class="hidden mt-4 pt-4 border-t border-slate-700/50">
+                <p class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Administración</p>
+                <a onclick="showPage('usuarios')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="usuarios">
+                    <i data-lucide="users" class="w-4 h-4"></i>Usuarios
+                </a>
+            </div>
         </nav>
         <div class="px-3 py-4 border-t border-slate-700/50">
             <div class="flex items-center gap-3 px-3">
@@ -117,23 +124,70 @@
         <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
             <div class="flex items-center gap-4">
                 <h2 id="page-title" class="text-lg font-semibold text-gray-800">Dashboard</h2>
-                <select id="global-regional" onchange="onFilterChange()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400">
-                    <option value="">Todas las regionales</option>
-                </select>
-                <div class="relative" id="almacen-search-wrap">
-                    <input id="global-almacen-input" type="text" placeholder="Todos los almacenes"
-                        class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400 w-48"
-                        onfocus="showAlmacenDropdown()" oninput="filterAlmacenDropdown()">
-                    <input type="hidden" id="global-almacen" value="">
-                    <button onclick="clearAlmacenFilter()" id="almacen-clear-btn" class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500">
-                        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                <div class="relative" id="regional-search-wrap">
+                    <button onclick="toggleMultiDrop('regional')" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400 flex items-center gap-1.5 min-w-[140px]">
+                        <span id="regional-label">Todas las regionales</span>
+                        <i data-lucide="chevron-down" class="w-3.5 h-3.5 ml-auto text-gray-400"></i>
                     </button>
-                    <div id="almacen-dropdown" class="hidden absolute top-full left-0 mt-1 w-64 max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                    <div id="regional-dropdown" class="hidden absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                        <div class="px-3 py-2 border-b border-gray-100">
+                            <input id="regional-search" type="text" placeholder="Buscar..." class="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-400" oninput="filterMultiDrop('regional')">
+                        </div>
+                        <div class="px-3 py-1.5 border-b border-gray-100 flex items-center gap-2">
+                            <button onclick="multiSelectAll('regional')" class="text-[10px] text-blue-600 hover:underline">Todos</button>
+                            <button onclick="multiClearAll('regional')" class="text-[10px] text-red-500 hover:underline">Ninguno</button>
+                        </div>
+                        <div id="regional-list" class="max-h-48 overflow-y-auto py-1"></div>
                     </div>
                 </div>
-                <select id="global-marca" onchange="onFilterChange()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400">
-                    <option value="">Todas las marcas</option>
-                </select>
+                <div class="relative" id="almacen-search-wrap">
+                    <button onclick="toggleMultiDrop('almacen')" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400 flex items-center gap-1.5 min-w-[160px]">
+                        <span id="almacen-label">Todos los almacenes</span>
+                        <i data-lucide="chevron-down" class="w-3.5 h-3.5 ml-auto text-gray-400"></i>
+                    </button>
+                    <div id="almacen-dropdown" class="hidden absolute top-full left-0 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                        <div class="px-3 py-2 border-b border-gray-100">
+                            <input id="almacen-search" type="text" placeholder="Buscar almacén..." class="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-400" oninput="filterMultiDrop('almacen')">
+                        </div>
+                        <div class="px-3 py-1.5 border-b border-gray-100 flex items-center gap-2">
+                            <button onclick="multiSelectAll('almacen')" class="text-[10px] text-blue-600 hover:underline">Todos</button>
+                            <button onclick="multiClearAll('almacen')" class="text-[10px] text-red-500 hover:underline">Ninguno</button>
+                        </div>
+                        <div id="almacen-list" class="max-h-48 overflow-y-auto py-1"></div>
+                    </div>
+                </div>
+                <div class="relative" id="marca-search-wrap">
+                    <button onclick="toggleMultiDrop('marca')" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400 flex items-center gap-1.5 min-w-[140px]">
+                        <span id="marca-label">Todas las marcas</span>
+                        <i data-lucide="chevron-down" class="w-3.5 h-3.5 ml-auto text-gray-400"></i>
+                    </button>
+                    <div id="marca-dropdown" class="hidden absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                        <div class="px-3 py-2 border-b border-gray-100">
+                            <input id="marca-search" type="text" placeholder="Buscar marca..." class="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-400" oninput="filterMultiDrop('marca')">
+                        </div>
+                        <div class="px-3 py-1.5 border-b border-gray-100 flex items-center gap-2">
+                            <button onclick="multiSelectAll('marca')" class="text-[10px] text-blue-600 hover:underline">Todos</button>
+                            <button onclick="multiClearAll('marca')" class="text-[10px] text-red-500 hover:underline">Ninguno</button>
+                        </div>
+                        <div id="marca-list" class="max-h-48 overflow-y-auto py-1"></div>
+                    </div>
+                </div>
+                <div class="relative" id="tiporef-search-wrap">
+                    <button onclick="toggleMultiDrop('tiporef')" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400 flex items-center gap-1.5 min-w-[150px]">
+                        <span id="tiporef-label">Tipo Referencia</span>
+                        <i data-lucide="chevron-down" class="w-3.5 h-3.5 ml-auto text-gray-400"></i>
+                    </button>
+                    <div id="tiporef-dropdown" class="hidden absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                        <div class="px-3 py-2 border-b border-gray-100">
+                            <input id="tiporef-search" type="text" placeholder="Buscar tipo..." class="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-400" oninput="filterMultiDrop('tiporef')">
+                        </div>
+                        <div class="px-3 py-1.5 border-b border-gray-100 flex items-center gap-2">
+                            <button onclick="multiSelectAll('tiporef')" class="text-[10px] text-blue-600 hover:underline">Todos</button>
+                            <button onclick="multiClearAll('tiporef')" class="text-[10px] text-red-500 hover:underline">Ninguno</button>
+                        </div>
+                        <div id="tiporef-list" class="max-h-48 overflow-y-auto py-1"></div>
+                    </div>
+                </div>
             </div>
             <div class="flex items-center gap-3">
                 <span id="last-update" class="text-xs text-gray-400"></span>
@@ -148,8 +202,8 @@
 
             <!-- ===== DASHBOARD ===== -->
             <div id="page-dashboard" class="page active">
-                <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6"></div>
-                <div id="salud-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6"></div>
+                <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4 mb-6"></div>
+                <div id="salud-cards" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-6"></div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <div class="flex items-center justify-between mb-4">
@@ -188,23 +242,25 @@
                 <div class="flex flex-wrap items-center gap-3 mb-4">
                     <select id="filtro-alerta-tipo" onchange="loadAlertas()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
                         <option value="">Todos los tipos</option>
+                        <option value="STOCK_AGOTADO">Stock Agotado</option>
                         <option value="STOCK_CRITICO">Stock Crítico</option>
                         <option value="STOCK_BAJO">Stock Bajo</option>
                         <option value="SOBREINVENTARIO">Sobreinventario</option>
                         <option value="BAJA_ROTACION">Baja Rotación</option>
-                    </select>
-                    <select id="filtro-alerta-nivel" onchange="loadAlertas()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
-                        <option value="">Todos los niveles</option>
-                        <option value="CRITICO">Crítico</option>
-                        <option value="ALTO">Alto</option>
-                        <option value="MEDIO">Medio</option>
-                        <option value="BAJO">Bajo</option>
+                        <option value="SIN_ROTACION">Sin Rotación</option>
                     </select>
                     <select id="filtro-alerta-estado" onchange="loadAlertas()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
                         <option value="PENDIENTE">Pendientes</option>
                         <option value="ATENDIDA">Atendidas</option>
                         <option value="IGNORADA">Ignoradas</option>
                         <option value="">Todas</option>
+                    </select>
+                    <select id="filtro-alerta-orden" onchange="sortAndRenderAlertas()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-blue-50 text-blue-700">
+                        <option value="fecha">Más recientes</option>
+                        <option value="stock_desc">Mayor stock</option>
+                        <option value="stock_asc">Menor stock</option>
+                        <option value="valor_desc">Mayor valor</option>
+                        <option value="valor_asc">Menor valor</option>
                     </select>
                     <div class="ml-auto">
                         <button onclick="exportData('alertas')" class="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
@@ -231,6 +287,17 @@
                         <option value="EJECUTADO">Ejecutados</option>
                         <option value="">Todos</option>
                     </select>
+                    <select id="filtro-traslado-origen" onchange="sortAndRenderTraslados()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="">Almacén Origen</option>
+                    </select>
+                    <select id="filtro-traslado-destino" onchange="sortAndRenderTraslados()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="">Almacén Destino</option>
+                    </select>
+                    <select id="filtro-traslado-orden" onchange="sortAndRenderTraslados()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-blue-50 text-blue-700">
+                        <option value="prioridad">Por prioridad</option>
+                        <option value="stock_desc">Mayor stock sugerido</option>
+                        <option value="stock_asc">Menor stock sugerido</option>
+                    </select>
                     <div class="ml-auto">
                         <button onclick="exportData('traslados')" class="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
                             <i data-lucide="download" class="w-3.5 h-3.5"></i>Exportar CSV
@@ -252,6 +319,14 @@
                     </select>
                     <select id="filtro-compra-marca" onchange="loadCompras()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
                         <option value="">Todas las marcas</option>
+                    </select>
+                    <select id="filtro-compra-orden" onchange="sortAndRenderCompras()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-blue-50 text-blue-700">
+                        <option value="prioridad">Por prioridad</option>
+                        <option value="stock_desc">Mayor stock</option>
+                        <option value="stock_asc">Menor stock</option>
+                        <option value="valor_desc">Mayor valor compra</option>
+                        <option value="valor_asc">Menor valor compra</option>
+                        <option value="cant_desc">Mayor cant. sugerida</option>
                     </select>
                     <div class="ml-auto">
                         <button onclick="exportData('compras')" class="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
@@ -343,6 +418,31 @@
             <div id="page-regionales" class="page">
                 <div id="regionales-content" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
             </div>
+
+            <!-- ===== USUARIOS (ADMIN) ===== -->
+            <div id="page-usuarios" class="page">
+                <div class="flex items-center justify-between mb-6">
+                    <p class="text-sm text-gray-500">Gestión de usuarios y permisos de acceso</p>
+                    <button onclick="openUserModal()" class="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+                        <i data-lucide="user-plus" class="w-4 h-4"></i>Nuevo Usuario
+                    </button>
+                </div>
+                <div id="usuarios-table-wrap" class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+                            <tr>
+                                <th class="px-4 py-3 text-left">Usuario</th>
+                                <th class="px-4 py-3 text-left">Nombre</th>
+                                <th class="px-4 py-3 text-left">Rol</th>
+                                <th class="px-4 py-3 text-left">Módulos</th>
+                                <th class="px-4 py-3 text-center">Estado</th>
+                                <th class="px-4 py-3 text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usuarios-tbody" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -358,6 +458,97 @@
     </div>
 </div>
 
+<!-- ============ MODAL USUARIO ============ -->
+<div id="modal-usuario" class="hidden fixed inset-0 z-50 modal-overlay flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto">
+        <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+            <h3 id="modal-user-title" class="font-semibold text-gray-800">Nuevo Usuario</h3>
+            <button onclick="closeUserModal()" class="p-1 hover:bg-gray-100 rounded-lg"><i data-lucide="x" class="w-5 h-5 text-gray-400"></i></button>
+        </div>
+        <div class="p-6 space-y-4">
+            <input type="hidden" id="edit-user-id" value="">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Username</label>
+                    <input id="inp-username" type="text" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="usuario">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Contraseña <span id="pwd-hint" class="text-gray-400 font-normal">(requerida)</span></label>
+                    <input id="inp-password" type="password" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="••••••">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Nombre completo</label>
+                    <input id="inp-nombre" type="text" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Nombre">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Email</label>
+                    <input id="inp-email" type="email" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="correo@empresa.com">
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1">Rol</label>
+                <select id="inp-rol" onchange="onRolChange()" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="viewer">Viewer - Solo lectura</option>
+                    <option value="manager">Manager - Gestión</option>
+                    <option value="admin">Admin - Acceso total</option>
+                </select>
+            </div>
+            <div id="modulos-section">
+                <label class="block text-xs font-medium text-gray-600 mb-2">Módulos permitidos</label>
+                <div class="grid grid-cols-2 gap-2" id="modulos-checkboxes">
+                    <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input type="checkbox" value="dashboard" class="mod-check rounded text-blue-600 w-4 h-4" checked>
+                        <i data-lucide="layout-dashboard" class="w-3.5 h-3.5 text-gray-400"></i>
+                        <span class="text-xs text-gray-700">Dashboard</span>
+                    </label>
+                    <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input type="checkbox" value="alertas" class="mod-check rounded text-blue-600 w-4 h-4">
+                        <i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-gray-400"></i>
+                        <span class="text-xs text-gray-700">Alertas</span>
+                    </label>
+                    <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input type="checkbox" value="traslados" class="mod-check rounded text-blue-600 w-4 h-4">
+                        <i data-lucide="truck" class="w-3.5 h-3.5 text-gray-400"></i>
+                        <span class="text-xs text-gray-700">Traslados</span>
+                    </label>
+                    <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input type="checkbox" value="compras" class="mod-check rounded text-blue-600 w-4 h-4">
+                        <i data-lucide="shopping-cart" class="w-3.5 h-3.5 text-gray-400"></i>
+                        <span class="text-xs text-gray-700">Compras</span>
+                    </label>
+                    <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input type="checkbox" value="almacenes" class="mod-check rounded text-blue-600 w-4 h-4">
+                        <i data-lucide="warehouse" class="w-3.5 h-3.5 text-gray-400"></i>
+                        <span class="text-xs text-gray-700">Almacenes</span>
+                    </label>
+                    <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input type="checkbox" value="analisis" class="mod-check rounded text-blue-600 w-4 h-4">
+                        <i data-lucide="pie-chart" class="w-3.5 h-3.5 text-gray-400"></i>
+                        <span class="text-xs text-gray-700">Análisis</span>
+                    </label>
+                    <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input type="checkbox" value="productos" class="mod-check rounded text-blue-600 w-4 h-4">
+                        <i data-lucide="search" class="w-3.5 h-3.5 text-gray-400"></i>
+                        <span class="text-xs text-gray-700">Productos</span>
+                    </label>
+                    <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                        <input type="checkbox" value="regionales" class="mod-check rounded text-blue-600 w-4 h-4">
+                        <i data-lucide="map-pin" class="w-3.5 h-3.5 text-gray-400"></i>
+                        <span class="text-xs text-gray-700">Regionales</span>
+                    </label>
+                </div>
+            </div>
+            <div id="user-modal-error" class="hidden p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs"></div>
+            <div class="flex justify-end gap-3 pt-2">
+                <button onclick="closeUserModal()" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
+                <button onclick="saveUser()" id="btn-save-user" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">Crear Usuario</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // ============================================
 // CONFIG & STATE
@@ -369,12 +560,15 @@ let currentPage = 'dashboard';
 let filtros = {};
 let salesChart = null;
 let searchTimer = null;
+let cachedAlertas = [];
+let cachedTraslados = [];
+let cachedCompras = [];
 
 // ============================================
 // API HELPERS
 // ============================================
 async function api(path, opts = {}) {
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch(API_URL + path, { ...opts, headers });
     if (res.status === 401) { doLogout(); throw new Error('Sesión expirada'); }
@@ -387,11 +581,24 @@ function formatCurrency(v) {
     return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
 }
 function formatNumber(v) { return new Intl.NumberFormat('es-CO').format(Math.round(v)); }
+function diasMeses(d) {
+    if (d >= 9999) return '∞';
+    const dias = Math.round(d);
+    const meses = (d / 30).toFixed(1);
+    return `${formatNumber(dias)}d <span class="text-gray-400">(${meses}m)</span>`;
+}
+function diasMesesPlain(d) {
+    if (d >= 9999) return '∞';
+    return `${Math.round(d)}d (${(d / 30).toFixed(1)}m)`;
+}
 function badge(text, type) {
     const cls = type ? `badge-${type.toLowerCase()}` : 'bg-gray-100 text-gray-600';
     return `<span class="px-2 py-0.5 rounded text-xs font-medium ${cls}">${text}</span>`;
 }
 function truncate(s, n = 55) { return s && s.length > n ? s.substring(0, n) + '...' : (s || ''); }
+function fmtMensaje(msg) {
+    return msg.replace(/\$(\d+)/g, (_, n) => '$' + formatNumber(Number(n)));
+}
 
 // ============================================
 // AUTH
@@ -440,7 +647,25 @@ function showApp() {
         document.getElementById('user-role').textContent = currentUser.rol;
         document.getElementById('user-avatar').textContent = (currentUser.nombre || currentUser.username)[0].toUpperCase();
     }
+    applyModuleAccess();
     initApp();
+}
+
+function applyModuleAccess() {
+    if (!currentUser) return;
+    const isAdmin = currentUser.rol === 'admin';
+    const mods = currentUser.modulos || [];
+
+    document.getElementById('nav-admin-section').classList.toggle('hidden', !isAdmin);
+
+    const allPages = ['dashboard','alertas','traslados','compras','almacenes','analisis','productos','regionales'];
+    allPages.forEach(p => {
+        const navEl = document.querySelector(`.sidebar-item[data-page="${p}"]`);
+        if (navEl) {
+            const allowed = isAdmin || mods.includes(p);
+            navEl.classList.toggle('hidden', !allowed);
+        }
+    });
 }
 
 // ============================================
@@ -452,7 +677,7 @@ function showPage(page) {
     document.getElementById('page-' + page).classList.add('active');
     document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
     document.querySelector(`.sidebar-item[data-page="${page}"]`).classList.add('active');
-    const titles = { dashboard: 'Dashboard', alertas: 'Alertas', traslados: 'Traslados', compras: 'Compras Sugeridas', almacenes: 'Almacenes', analisis: 'Análisis de Inventario', productos: 'Búsqueda de Productos', regionales: 'Regionales' };
+    const titles = { dashboard: 'Dashboard', alertas: 'Alertas', traslados: 'Traslados', compras: 'Compras Sugeridas', almacenes: 'Almacenes', analisis: 'Análisis de Inventario', productos: 'Búsqueda de Productos', regionales: 'Regionales', usuarios: 'Gestión de Usuarios' };
     document.getElementById('page-title').textContent = titles[page] || page;
     refreshCurrentPage();
     lucide.createIcons();
@@ -462,91 +687,148 @@ function refreshCurrentPage() {
     const loaders = {
         dashboard: loadDashboard, alertas: loadAlertas, traslados: loadTraslados,
         compras: loadCompras, almacenes: loadAlmacenes, productos: () => {},
-        analisis: loadAnalisis, regionales: loadRegionales
+        analisis: loadAnalisis, regionales: loadRegionales, usuarios: loadUsuarios
     };
     if (loaders[currentPage]) loaders[currentPage]();
     document.getElementById('last-update').textContent = 'Actualizado: ' + new Date().toLocaleTimeString('es-CO');
 }
 
-function onFilterChange() {
-    const src = event ? event.target : null;
-    if (src && src.id === 'global-regional') updateAlmacenDropdown();
-    refreshCurrentPage();
-}
-function getRegional() { return document.getElementById('global-regional').value; }
-function getAlmacen() { return document.getElementById('global-almacen').value; }
-function getMarca() { return document.getElementById('global-marca').value; }
+// ============================================
+// MULTI-SELECT FILTERS
+// ============================================
+const multiState = {
+    regional: { selected: new Set(), items: [], allLabel: 'Todas las regionales' },
+    almacen:  { selected: new Set(), items: [], allLabel: 'Todos los almacenes' },
+    marca:    { selected: new Set(), items: [], allLabel: 'Todas las marcas' },
+    tiporef:  { selected: new Set(), items: [], allLabel: 'Tipo Referencia' }
+};
 
-function updateAlmacenDropdown() {
-    const regional = getRegional();
-    const filtered = regional
-        ? filtros.almacenes.filter(a => a.regional === regional)
-        : filtros.almacenes;
-    document.getElementById('global-almacen').value = '';
-    document.getElementById('global-almacen-input').value = '';
-    document.getElementById('almacen-clear-btn').classList.add('hidden');
-    almacenListCache = filtered;
-    renderAlmacenDropdown(filtered);
-}
+function getRegional() { return [...multiState.regional.selected].join(','); }
+function getAlmacen()  { return [...multiState.almacen.selected].join(','); }
+function getMarca()    { return [...multiState.marca.selected].join(','); }
+function getTipoRef()  { return [...multiState.tiporef.selected].join(','); }
 
-let almacenListCache = [];
-
-function showAlmacenDropdown() {
-    const dd = document.getElementById('almacen-dropdown');
-    dd.classList.remove('hidden');
-    renderAlmacenDropdown(almacenListCache);
+function toggleMultiDrop(key) {
+    const dd = document.getElementById(key + '-dropdown');
+    const isOpen = !dd.classList.contains('hidden');
+    closeAllMultiDrops();
+    if (!isOpen) {
+        dd.classList.remove('hidden');
+        renderMultiList(key);
+        document.getElementById(key + '-search').focus();
+    }
 }
 
-function hideAlmacenDropdown() {
-    setTimeout(() => document.getElementById('almacen-dropdown').classList.add('hidden'), 200);
-}
-
-function filterAlmacenDropdown() {
-    const q = document.getElementById('global-almacen-input').value.toLowerCase();
-    const filtered = q ? almacenListCache.filter(a => a.nombre.toLowerCase().includes(q) || a.codigo.toLowerCase().includes(q)) : almacenListCache;
-    renderAlmacenDropdown(filtered);
-}
-
-function renderAlmacenDropdown(list) {
-    const dd = document.getElementById('almacen-dropdown');
-    dd.innerHTML = `<div class="px-3 py-2 text-xs text-gray-400 cursor-pointer hover:bg-blue-50" onclick="selectAlmacen('','Todos los almacenes')">Todos los almacenes</div>` +
-        list.map(a => `<div class="px-3 py-2 text-xs text-gray-700 cursor-pointer hover:bg-blue-50" onclick="selectAlmacen('${a.codigo}','${a.nombre.replace(/'/g,"\\'")}')">
-            <span class="font-medium">${a.nombre}</span> <span class="text-gray-400">${a.regional || ''}</span>
-        </div>`).join('');
-}
-
-function selectAlmacen(code, name) {
-    document.getElementById('global-almacen').value = code;
-    document.getElementById('global-almacen-input').value = code ? name : '';
-    document.getElementById('almacen-dropdown').classList.add('hidden');
-    document.getElementById('almacen-clear-btn').classList.toggle('hidden', !code);
-    refreshCurrentPage();
-}
-
-function clearAlmacenFilter() {
-    selectAlmacen('', '');
+function closeAllMultiDrops() {
+    ['regional','almacen','marca','tiporef'].forEach(k =>
+        document.getElementById(k + '-dropdown').classList.add('hidden'));
 }
 
 document.addEventListener('click', e => {
-    if (!document.getElementById('almacen-search-wrap').contains(e.target))
-        document.getElementById('almacen-dropdown').classList.add('hidden');
+    ['regional','almacen','marca','tiporef'].forEach(k => {
+        if (!document.getElementById(k + '-search-wrap').contains(e.target))
+            document.getElementById(k + '-dropdown').classList.add('hidden');
+    });
 });
+
+function filterMultiDrop(key) {
+    renderMultiList(key);
+}
+
+function renderMultiList(key) {
+    const st = multiState[key];
+    const q = document.getElementById(key + '-search').value.toLowerCase();
+    let items = st.items;
+    if (q) items = items.filter(it => it.label.toLowerCase().includes(q) || it.code.toLowerCase().includes(q));
+    const container = document.getElementById(key + '-list');
+    container.innerHTML = items.map(it => {
+        const checked = st.selected.has(it.code) ? 'checked' : '';
+        return `<label class="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-blue-50 cursor-pointer">
+            <input type="checkbox" ${checked} onchange="toggleMultiItem('${key}','${it.code}')" class="rounded text-blue-600 w-3.5 h-3.5">
+            <span class="truncate">${it.label}</span>
+            ${it.extra ? `<span class="text-gray-400 ml-auto text-[10px]">${it.extra}</span>` : ''}
+        </label>`;
+    }).join('');
+}
+
+function toggleMultiItem(key, code) {
+    const st = multiState[key];
+    if (st.selected.has(code)) st.selected.delete(code);
+    else st.selected.add(code);
+    updateMultiLabel(key);
+    if (key === 'regional') updateAlmacenItems();
+    refreshCurrentPage();
+}
+
+function multiSelectAll(key) {
+    const st = multiState[key];
+    const q = document.getElementById(key + '-search').value.toLowerCase();
+    let items = st.items;
+    if (q) items = items.filter(it => it.label.toLowerCase().includes(q) || it.code.toLowerCase().includes(q));
+    items.forEach(it => st.selected.add(it.code));
+    updateMultiLabel(key);
+    renderMultiList(key);
+    if (key === 'regional') updateAlmacenItems();
+    refreshCurrentPage();
+}
+
+function multiClearAll(key) {
+    multiState[key].selected.clear();
+    updateMultiLabel(key);
+    renderMultiList(key);
+    if (key === 'regional') updateAlmacenItems();
+    refreshCurrentPage();
+}
+
+function updateMultiLabel(key) {
+    const st = multiState[key];
+    const label = document.getElementById(key + '-label');
+    const n = st.selected.size;
+    if (n === 0) label.textContent = st.allLabel;
+    else if (n === 1) {
+        const it = st.items.find(i => i.code === [...st.selected][0]);
+        label.textContent = it ? it.label : [...st.selected][0];
+    } else {
+        label.textContent = `${n} seleccionados`;
+    }
+    label.classList.toggle('text-blue-600', n > 0);
+    label.classList.toggle('font-medium', n > 0);
+}
+
+function updateAlmacenItems() {
+    const regSel = multiState.regional.selected;
+    multiState.almacen.items = regSel.size > 0
+        ? filtros.almacenes.filter(a => regSel.has(a.regional)).map(a => ({ code: a.codigo, label: a.nombre, extra: a.regional }))
+        : filtros.almacenes.map(a => ({ code: a.codigo, label: a.nombre, extra: a.regional }));
+    const validCodes = new Set(multiState.almacen.items.map(i => i.code));
+    multiState.almacen.selected = new Set([...multiState.almacen.selected].filter(c => validCodes.has(c)));
+    updateMultiLabel('almacen');
+}
+
+function onFilterChange() { refreshCurrentPage(); }
+
+function buildGlobalQS() {
+    const r = getRegional(), a = getAlmacen(), m = getMarca(), t = getTipoRef();
+    let qs = '';
+    if (r) qs += `regional=${encodeURIComponent(r)}&`;
+    if (a) qs += `almacen=${encodeURIComponent(a)}&`;
+    if (m) qs += `marca=${encodeURIComponent(m)}&`;
+    if (t) qs += `tipo_ref=${encodeURIComponent(t)}&`;
+    return qs;
+}
 
 // ============================================
 // DASHBOARD
 // ============================================
 async function loadDashboard() {
     try {
-        const r = getRegional();
-        const m = getMarca();
-        let qs = '?';
-        if (r) qs += `regional=${r}&`;
-        if (m) qs += `marca=${m}&`;
+        const g = buildGlobalQS();
+        let qs = '?' + g;
         const [kpis, eficiencia, top, analisis, regionales, almResumen] = await Promise.all([
             api('/kpis' + qs), api('/ventas/eficiencia' + qs), api('/ventas/top-productos' + qs + 'limit=10'),
-            api('/analisis/inventario?tipo=Venta&' + qs.slice(1)),
-            api('/regionales'),
-            api('/almacenes/resumen?tipo=Venta&' + qs.slice(1))
+            api('/analisis/inventario?tipo=Venta&' + g),
+            api('/regionales?' + g),
+            api('/almacenes/resumen?tipo=Venta&' + g)
         ]);
         renderKPIs(kpis);
         renderSaludCards(kpis.salud_inventario);
@@ -563,12 +845,12 @@ async function loadDashboard() {
 
 function renderKPIs(k) {
     document.getElementById('kpi-cards').innerHTML = `
-        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-sm p-5 text-white">
             <div class="flex items-center justify-between">
-                <div><p class="text-xs text-gray-500 font-medium">Valor Inventario</p>
-                    <p class="text-xl font-bold mt-1 text-emerald-600">${formatCurrency(k.inventario.valor_inventario)}</p>
-                    <p class="text-[11px] text-gray-400 mt-0.5">${formatNumber(k.inventario.total_productos)} productos en ${k.inventario.total_almacenes} almacenes</p></div>
-                <div class="p-2.5 rounded-lg bg-emerald-50"><i data-lucide="dollar-sign" class="w-5 h-5 text-emerald-600"></i></div>
+                <div><p class="text-xs font-medium text-slate-300">Valor Inventario</p>
+                    <p class="text-xl font-bold mt-1">${formatCurrency(k.inventario.valor_inventario)}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${formatNumber(k.inventario.total_productos)} SKUs · ${k.inventario.total_almacenes} almacenes</p></div>
+                <div class="p-2.5 rounded-lg bg-white/10"><i data-lucide="dollar-sign" class="w-5 h-5 text-white"></i></div>
             </div>
         </div>
         <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
@@ -583,7 +865,7 @@ function renderKPIs(k) {
             <div class="flex items-center justify-between">
                 <div><p class="text-xs text-gray-500 font-medium">Alertas Activas</p>
                     <p class="text-xl font-bold mt-1 ${k.alertas.criticas > 0 ? 'text-red-600' : 'text-yellow-600'}">${k.alertas.total}</p>
-                    <p class="text-[11px] text-gray-400 mt-0.5">${k.alertas.criticas} críticas · ${k.alertas.bajas} bajas</p></div>
+                    <p class="text-[11px] text-gray-400 mt-0.5">${k.alertas.criticas} críticas · ${k.alertas.agotado || 0} agotado · ${k.alertas.sin_rotacion || 0} sin rotación</p></div>
                 <div class="p-2.5 rounded-lg ${k.alertas.criticas > 0 ? 'bg-red-50' : 'bg-yellow-50'}"><i data-lucide="alert-triangle" class="w-5 h-5 ${k.alertas.criticas > 0 ? 'text-red-600' : 'text-yellow-600'}"></i></div>
             </div>
         </div>
@@ -602,77 +884,65 @@ function renderKPIs(k) {
                     <p class="text-[11px] text-gray-400 mt-0.5">${formatCurrency(k.compras.valor_estimado)}</p></div>
                 <div class="p-2.5 rounded-lg bg-orange-50"><i data-lucide="shopping-cart" class="w-5 h-5 text-orange-600"></i></div>
             </div>
-        </div>`;
+        </div>
+        ${k.venta_perdida ? `
+        <div class="bg-gradient-to-br from-rose-500 to-red-600 rounded-xl shadow-sm p-5 text-white">
+            <div class="flex items-center justify-between">
+                <div><p class="text-xs font-medium text-rose-100">Venta Perdida</p>
+                    <p class="text-xl font-bold mt-1">${formatCurrency(k.venta_perdida.valor)}</p>
+                    <p class="text-[11px] text-rose-200 mt-0.5">${formatNumber(k.venta_perdida.items)} SKUs · ${formatNumber(k.venta_perdida.unidades)} uds sin stock</p></div>
+                <div class="p-2.5 rounded-lg bg-white/20"><i data-lucide="ban" class="w-5 h-5 text-white"></i></div>
+            </div>
+        </div>` : ''}
+        ${k.proyectos ? `
+        <div class="bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl shadow-sm p-5 text-white">
+            <div class="flex items-center justify-between">
+                <div><p class="text-xs font-medium text-indigo-100">Proyectos</p>
+                    <p class="text-xl font-bold mt-1">${formatNumber(k.proyectos.items)} <span class="text-xs font-normal text-indigo-200">SKUs</span></p>
+                    <p class="text-[11px] text-indigo-200 mt-0.5">${formatNumber(k.proyectos.unidades)} uds · ${formatCurrency(k.proyectos.valor)}</p></div>
+                <div class="p-2.5 rounded-lg bg-white/20"><i data-lucide="briefcase" class="w-5 h-5 text-white"></i></div>
+            </div>
+        </div>` : ''}`;
     lucide.createIcons();
 }
 
 function renderSaludCards(s) {
     if (!s) { document.getElementById('salud-cards').innerHTML = ''; return; }
     const cats = [
-        { key: 'sano', label: 'Stock Sano', desc: 'Con ventas, sin alertas', icon: 'check-circle', color: 'emerald', bg: 'emerald' },
-        { key: 'critico', label: 'Stock Crítico', desc: 'En riesgo de agotarse', icon: 'alert-octagon', color: 'red', bg: 'red' },
-        { key: 'bajo', label: 'Stock Bajo', desc: 'Por debajo del mínimo', icon: 'alert-triangle', color: 'yellow', bg: 'yellow' },
-        { key: 'sobreinventario', label: 'Sobreinventario', desc: 'Exceso sin rotación', icon: 'archive', color: 'orange', bg: 'orange' }
+        { key: 'sano', label: 'Stock Sano', desc: 'Ventas activas', icon: 'check-circle', color: 'emerald', bg: 'emerald' },
+        { key: 'agotado', label: 'Agotado', desc: 'Demanda sin stock', icon: 'x-circle', color: 'rose', bg: 'rose' },
+        { key: 'critico', label: 'Crítico', desc: 'Riesgo agotarse', icon: 'alert-octagon', color: 'red', bg: 'red' },
+        { key: 'bajo', label: 'Stock Bajo', desc: 'Bajo mínimo', icon: 'alert-triangle', color: 'yellow', bg: 'yellow' },
+        { key: 'sobreinventario', label: 'Sobreinventario', desc: 'Exceso de stock', icon: 'archive', color: 'orange', bg: 'orange' },
+        { key: 'baja_rotacion', label: 'Baja Rotación', desc: 'Poca venta 90d', icon: 'activity', color: 'amber', bg: 'amber' },
+        { key: 'sin_rotacion', label: 'Sin Rotación', desc: 'Sin ventas 30d', icon: 'pause-circle', color: 'violet', bg: 'violet' }
     ];
-    const sinClasificar = s.total_items - (s.sano.items + s.critico.items + s.bajo.items + s.sobreinventario.items);
-    const sinClasificarVal = s.total_valor - (s.sano.valor + s.critico.valor + s.bajo.valor + s.sobreinventario.valor);
-    const sinClasificarPct = s.total_valor > 0 ? (sinClasificarVal / s.total_valor * 100).toFixed(1) : 0;
-
-    const totalCard = `
-        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-sm p-4 text-white">
-            <div class="flex items-center gap-3 mb-3">
-                <div class="p-2 rounded-lg bg-white/10"><i data-lucide="boxes" class="w-4 h-4 text-white"></i></div>
-                <div>
-                    <p class="text-xs font-semibold">Total Inventario</p>
-                    <p class="text-[10px] text-slate-400">Todos los tipos</p>
-                </div>
-            </div>
-            <div class="flex items-end justify-between">
-                <div>
-                    <p class="text-lg font-bold">${formatNumber(s.total_items)}</p>
-                    <p class="text-[10px] text-slate-400">producto-almacén</p>
-                </div>
-                <div class="text-right">
-                    <p class="text-sm font-bold">${formatCurrency(s.total_valor)}</p>
-                    <p class="text-[10px] text-slate-400">Sin clasificar: ${formatNumber(sinClasificar)} (${sinClasificarPct}%)</p>
-                </div>
-            </div>
-            <div class="mt-2 w-full h-1.5 bg-slate-700 rounded-full overflow-hidden flex">
-                <div class="h-full bg-emerald-500" style="width:${s.sano.pct}%" title="Sano ${s.sano.pct}%"></div>
-                <div class="h-full bg-red-500" style="width:${s.critico.pct}%" title="Crítico ${s.critico.pct}%"></div>
-                <div class="h-full bg-yellow-500" style="width:${s.bajo.pct}%" title="Bajo ${s.bajo.pct}%"></div>
-                <div class="h-full bg-orange-500" style="width:${s.sobreinventario.pct}%" title="Sobre ${s.sobreinventario.pct}%"></div>
-            </div>
-        </div>`;
 
     const catCards = cats.map(c => {
-        const d = s[c.key] || { items: 0, valor: 0, pct: 0 };
+        const d = s[c.key] || { skus: 0, valor: 0, pct: 0 };
         return `
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-            <div class="flex items-center gap-3 mb-3">
-                <div class="p-2 rounded-lg bg-${c.bg}-50"><i data-lucide="${c.icon}" class="w-4 h-4 text-${c.color}-600"></i></div>
-                <div>
-                    <p class="text-xs font-semibold text-gray-700">${c.label}</p>
-                    <p class="text-[10px] text-gray-400">${c.desc}</p>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-3">
+            <div class="flex items-center gap-2 mb-2">
+                <div class="p-1.5 rounded-lg bg-${c.bg}-50"><i data-lucide="${c.icon}" class="w-3.5 h-3.5 text-${c.color}-600"></i></div>
+                <div class="min-w-0">
+                    <p class="text-[11px] font-semibold text-gray-700 truncate">${c.label}</p>
+                    <p class="text-[9px] text-gray-400 truncate">${c.desc}</p>
                 </div>
             </div>
             <div class="flex items-end justify-between">
                 <div>
-                    <p class="text-lg font-bold text-${c.color}-600">${formatNumber(d.items)}</p>
-                    <p class="text-[10px] text-gray-400">producto-almacén</p>
+                    <p class="text-base font-bold text-${c.color}-600">${formatNumber(d.skus)}</p>
+                    <p class="text-[9px] text-gray-400">SKUs · ${formatCurrency(d.valor)}</p>
                 </div>
-                <div class="text-right">
-                    <p class="text-sm font-bold text-${c.color}-600">${d.pct}%</p>
-                    <p class="text-[10px] text-gray-400">${formatCurrency(d.valor)}</p>
-                </div>
+                <p class="text-sm font-bold text-${c.color}-600">${d.pct}%</p>
             </div>
-            <div class="mt-2 w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div class="mt-1.5 w-full h-1 bg-gray-100 rounded-full overflow-hidden">
                 <div class="h-full bg-${c.color}-500 rounded-full transition-all" style="width:${Math.min(d.pct, 100)}%"></div>
             </div>
         </div>`;
     }).join('');
 
-    document.getElementById('salud-cards').innerHTML = totalCard + catCards;
+    document.getElementById('salud-cards').innerHTML = catCards;
     lucide.createIcons();
 }
 
@@ -680,8 +950,8 @@ function renderEficienciaChart(resp) {
     const data = resp.datos || [];
     const ventaTotal = data.reduce((s, d) => s + d.venta, 0);
     const invPromedio = data.length > 0 ? data.reduce((s, d) => s + d.inventario, 0) / data.length : 0;
-    const pctTotal = invPromedio > 0 ? (ventaTotal / invPromedio * 100).toFixed(1) : '0';
-    document.getElementById('eficiencia-total').textContent = `${pctTotal}% eficiencia 30d`;
+    const pctTotal = invPromedio > 0 ? (ventaTotal / invPromedio * 100).toFixed(2) : '0.00';
+    document.getElementById('eficiencia-total').textContent = `${pctTotal}% eficiencia 30d · Venta ${formatCurrency(ventaTotal)} · Inv. prom. ${formatCurrency(invPromedio)}`;
 
     const ctx = document.getElementById('chart-ventas');
     if (salesChart) salesChart.destroy();
@@ -691,9 +961,16 @@ function renderEficienciaChart(resp) {
             labels: data.map(d => { const dt = new Date(d.fecha + 'T12:00:00'); return dt.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }); }),
             datasets: [
                 {
+                    label: 'Inventario disponible',
+                    data: data.map(d => d.inventario),
+                    backgroundColor: 'rgba(16,185,129,.18)',
+                    borderColor: '#10b981', borderWidth: 1, borderRadius: 3,
+                    yAxisID: 'y', order: 3
+                },
+                {
                     label: 'Venta diaria',
                     data: data.map(d => d.venta),
-                    backgroundColor: 'rgba(59,130,246,.5)',
+                    backgroundColor: 'rgba(59,130,246,.55)',
                     borderColor: '#3b82f6', borderWidth: 1, borderRadius: 3,
                     yAxisID: 'y', order: 2
                 },
@@ -709,7 +986,10 @@ function renderEficienciaChart(resp) {
         options: {
             responsive: true, maintainAspectRatio: false,
             plugins: {
-                legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } }
+                legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                tooltip: { callbacks: { label: ctx => ctx.dataset.yAxisID === 'y1'
+                    ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}%`
+                    : `${ctx.dataset.label}: ${formatCurrency(ctx.parsed.y)}` } }
             },
             scales: {
                 y: {
@@ -783,17 +1063,20 @@ function renderDashPieRegional(resp) {
 
 function renderDashPieEstado(s) {
     if (!s) return;
-    const labels = ['Sano', 'Crítico', 'Bajo', 'Sobreinventario', 'Sin Movimiento'];
-    const sinMov = s.total_valor - (s.sano.valor + s.critico.valor + s.bajo.valor + s.sobreinventario.valor);
-    const values = [s.sano.valor, s.critico.valor, s.bajo.valor, s.sobreinventario.valor, Math.max(sinMov, 0)];
-    const colors = ['#10b981', '#ef4444', '#f59e0b', '#f97316', '#94a3b8'];
+    const sr = s.sin_rotacion || { valor: 0 };
+    const ag = s.agotado || { valor: 0 };
+    const br = s.baja_rotacion || { valor: 0 };
+    const labels = ['Sano', 'Agotado', 'Crítico', 'Bajo', 'Sobreinventario', 'Baja Rotación', 'Sin Rotación'];
+    const values = [s.sano.valor, ag.valor, s.critico.valor, s.bajo.valor, s.sobreinventario.valor, br.valor, sr.valor];
+    const colors = ['#10b981', '#e11d48', '#ef4444', '#f59e0b', '#f97316', '#d97706', '#8b5cf6'];
+    const totalVal = values.reduce((a, b) => a + b, 0) || 1;
     if (dashPieEstado) dashPieEstado.destroy();
     dashPieEstado = new Chart(document.getElementById('dash-pie-estado'), {
         type: 'doughnut',
         data: { labels, datasets: [{ data: values, backgroundColor: colors }] },
         options: { responsive: true, maintainAspectRatio: false,
             plugins: { legend: { position: 'right', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
-                tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatCurrency(ctx.raw)} (${(ctx.raw/s.total_valor*100).toFixed(1)}%)` } } } }
+                tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatCurrency(ctx.raw)} (${(ctx.raw/totalVal*100).toFixed(1)}%)` } } } }
     });
 }
 
@@ -825,7 +1108,7 @@ function renderDashTablaAlmacenes(resp) {
                     </td>
                     <td class="py-2 px-3 text-right">${formatCurrency(a.ventas_30d_valor)}</td>
                     <td class="py-2 px-3 text-right"><span class="font-semibold ${a.rotacion_pct > 30 ? 'text-green-600' : a.rotacion_pct > 15 ? 'text-yellow-600' : 'text-red-600'}">${a.rotacion_pct}%</span></td>
-                    <td class="py-2 px-3 text-right">${a.alertas_total} <span class="text-gray-400">(${a.stock_critico}c)</span></td>
+                    <td class="py-2 px-3 text-right">${formatNumber(a.alertas_total)} <span class="text-gray-400">(${formatNumber(a.stock_critico)}c)</span></td>
                 </tr>
             `).join('')}</tbody>
         </table></div>`;
@@ -836,19 +1119,25 @@ function renderDashTablaAlmacenes(resp) {
 // ============================================
 async function loadAlertas() {
     const tipo = document.getElementById('filtro-alerta-tipo').value;
-    const nivel = document.getElementById('filtro-alerta-nivel').value;
     const estado = document.getElementById('filtro-alerta-estado').value;
-    const regional = getRegional();
-    let qs = `?limit=100`;
+    let qs = `?limit=100&${buildGlobalQS()}`;
     if (tipo) qs += `&tipo=${tipo}`;
-    if (nivel) qs += `&nivel=${nivel}`;
     if (estado) qs += `&estado=${estado}`;
-    if (regional) qs += `&regional=${regional}`;
 
     try {
-        const data = await api('/alertas' + qs);
-        renderAlertas(data);
+        cachedAlertas = await api('/alertas' + qs);
+        sortAndRenderAlertas();
     } catch (e) { console.error(e); }
+}
+
+function sortAndRenderAlertas() {
+    const orden = document.getElementById('filtro-alerta-orden').value;
+    const sorted = [...cachedAlertas];
+    if (orden === 'stock_desc') sorted.sort((a, b) => b.stock_actual - a.stock_actual);
+    else if (orden === 'stock_asc') sorted.sort((a, b) => a.stock_actual - b.stock_actual);
+    else if (orden === 'valor_desc') sorted.sort((a, b) => (b.valor_stock || 0) - (a.valor_stock || 0));
+    else if (orden === 'valor_asc') sorted.sort((a, b) => (a.valor_stock || 0) - (b.valor_stock || 0));
+    renderAlertas(sorted);
 }
 
 function renderAlertas(data) {
@@ -856,19 +1145,42 @@ function renderAlertas(data) {
     if (!data.length) { el.innerHTML = '<p class="text-center text-gray-400 py-12">No hay alertas con estos filtros</p>'; return; }
     const borderColors = { CRITICO: 'border-red-500', ALTO: 'border-orange-500', MEDIO: 'border-yellow-500', BAJO: 'border-blue-500' };
     const bgColors = { CRITICO: 'bg-red-50', ALTO: 'bg-orange-50', MEDIO: 'bg-yellow-50', BAJO: 'bg-blue-50' };
-    el.innerHTML = data.map(a => `
-        <div class="p-4 rounded-lg border-l-4 ${borderColors[a.nivel] || 'border-gray-300'} ${bgColors[a.nivel] || 'bg-gray-50'} flex items-start justify-between gap-4">
+    const tipoLabels = {
+        'STOCK_CRITICO': 'Stock Crítico', 'STOCK_BAJO': 'Stock Bajo',
+        'SOBREINVENTARIO': 'Sobreinventario', 'BAJA_ROTACION': 'Baja Rotación',
+        'SIN_ROTACION': 'Sin Rotación'
+    };
+    const accionSugerida = {
+        'STOCK_CRITICO': '🔴 Reabastecer urgente',
+        'STOCK_BAJO': '🟡 Programar reabastecimiento',
+        'SOBREINVENTARIO': '📦 Redistribuir / Trasladar',
+        'BAJA_ROTACION': '🔄 Evaluar descontinuar',
+        'SIN_ROTACION': '🏷️ Promoción / Oferta / Redistribución'
+    };
+    el.innerHTML = data.map(a => {
+        const isSinRot = a.tipo_alerta === 'SIN_ROTACION';
+        const bColor = isSinRot ? 'border-slate-500' : (borderColors[a.nivel] || 'border-gray-300');
+        const bgColor = isSinRot ? 'bg-slate-50' : (bgColors[a.nivel] || 'bg-gray-50');
+        const diasInvTxt = a.dias_inventario < 9999 ? diasMesesPlain(a.dias_inventario) : 'Sin venta';
+        return `
+        <div class="p-4 rounded-lg border-l-4 ${bColor} ${bgColor} flex items-start justify-between gap-4">
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                     ${badge(a.nivel, a.nivel)}
-                    <span class="text-xs text-gray-500">${a.tipo_alerta.replace(/_/g, ' ')}</span>
+                    <span class="text-xs font-medium ${isSinRot ? 'text-slate-700 bg-slate-200 px-1.5 py-0.5 rounded' : 'text-gray-500'}">${tipoLabels[a.tipo_alerta] || a.tipo_alerta.replace(/_/g, ' ')}</span>
+                    <span class="text-[10px] font-mono bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">${a.referencia}</span>
+                    ${a.marca_codigo ? `<span class="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded font-medium">${a.marca_codigo}</span>` : ''}
                     ${a.estado !== 'PENDIENTE' ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">${a.estado}</span>` : ''}
                 </div>
-                <p class="font-medium text-gray-900 mt-1 text-sm">${truncate(a.producto_nombre || a.referencia, 65)}</p>
+                <p class="font-medium text-gray-900 mt-1 text-sm">${truncate(a.producto_nombre || a.referencia, 70)}</p>
                 <p class="text-xs text-gray-600 mt-1">
                     <span class="inline-flex items-center gap-1"><i data-lucide="map-pin" class="w-3 h-3"></i>${a.almacen_nombre || a.bodega_codigo}</span>
-                    ${a.regional ? ` · ${a.regional}` : ''} · Stock: <strong>${Math.round(a.stock_actual)}</strong>
-                    · ${a.dias_inventario < 9999 ? a.dias_inventario.toFixed(1) + ' días inv.' : 'Sin venta'}
+                    ${a.regional ? ` · ${a.regional}` : ''} · Stock: <strong>${formatNumber(a.stock_actual)}</strong>
+                    · ${diasInvTxt}${a.valor_stock ? ` · Valor: <strong>${formatCurrency(a.valor_stock)}</strong>` : ''}
+                    · Nac: <strong>${formatNumber(a.stock_nacional)}</strong>
+                </p>
+                <p class="text-[11px] mt-1 ${isSinRot ? 'text-slate-600 font-medium' : 'text-gray-400'}">
+                    ${accionSugerida[a.tipo_alerta] || ''}${a.mensaje ? ' — ' + fmtMensaje(a.mensaje) : ''}
                 </p>
                 ${a.atendida_por ? `<p class="text-[11px] text-gray-400 mt-1">Atendida por ${a.atendida_por}</p>` : ''}
             </div>
@@ -877,8 +1189,8 @@ function renderAlertas(data) {
                 <button onclick="updateAlerta(${a.id}, 'ATENDIDA')" class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200" title="Marcar como atendida">Atender</button>
                 <button onclick="updateAlerta(${a.id}, 'IGNORADA')" class="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200" title="Ignorar">Ignorar</button>
             </div>` : ''}
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
     lucide.createIcons();
 }
 
@@ -893,12 +1205,38 @@ async function updateAlerta(id, estado) {
 async function loadTraslados() {
     const prioridad = document.getElementById('filtro-traslado-prioridad').value;
     const estado = document.getElementById('filtro-traslado-estado').value;
-    const regional = getRegional();
-    let qs = '?limit=100';
+    let qs = `?limit=100&${buildGlobalQS()}`;
     if (prioridad) qs += `&prioridad=${prioridad}`;
     if (estado) qs += `&estado=${estado}`;
-    if (regional) qs += `&regional=${regional}`;
-    try { renderTraslados(await api('/traslados' + qs)); } catch (e) { console.error(e); }
+    try {
+        cachedTraslados = await api('/traslados' + qs);
+        populateTrasladoAlmacenFilters();
+        sortAndRenderTraslados();
+    } catch (e) { console.error(e); }
+}
+
+function populateTrasladoAlmacenFilters() {
+    const origenes = [...new Set(cachedTraslados.map(t => t.origen_nombre || t.bodega_origen))].sort();
+    const destinos = [...new Set(cachedTraslados.map(t => t.destino_nombre || t.bodega_destino))].sort();
+    const selOrig = document.getElementById('filtro-traslado-origen');
+    const selDest = document.getElementById('filtro-traslado-destino');
+    const prevOrig = selOrig.value, prevDest = selDest.value;
+    selOrig.innerHTML = '<option value="">Almacén Origen</option>' + origenes.map(o => `<option value="${o}">${o}</option>`).join('');
+    selDest.innerHTML = '<option value="">Almacén Destino</option>' + destinos.map(d => `<option value="${d}">${d}</option>`).join('');
+    if (origenes.includes(prevOrig)) selOrig.value = prevOrig;
+    if (destinos.includes(prevDest)) selDest.value = prevDest;
+}
+
+function sortAndRenderTraslados() {
+    const orden = document.getElementById('filtro-traslado-orden').value;
+    const filtroOrigen = document.getElementById('filtro-traslado-origen').value;
+    const filtroDestino = document.getElementById('filtro-traslado-destino').value;
+    let filtered = [...cachedTraslados];
+    if (filtroOrigen) filtered = filtered.filter(t => (t.origen_nombre || t.bodega_origen) === filtroOrigen);
+    if (filtroDestino) filtered = filtered.filter(t => (t.destino_nombre || t.bodega_destino) === filtroDestino);
+    if (orden === 'stock_desc') filtered.sort((a, b) => b.cantidad_sugerida - a.cantidad_sugerida);
+    else if (orden === 'stock_asc') filtered.sort((a, b) => a.cantidad_sugerida - b.cantidad_sugerida);
+    renderTraslados(filtered);
 }
 
 function renderTraslados(data) {
@@ -909,6 +1247,7 @@ function renderTraslados(data) {
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                     ${badge(t.prioridad, t.prioridad)}
+                    <span class="text-[10px] font-mono bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">${t.referencia}</span>
                     ${t.estado !== 'PENDIENTE' ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">${t.estado}</span>` : ''}
                 </div>
                 <p class="font-medium text-gray-900 text-sm mt-1">${truncate(t.producto_nombre || t.referencia, 55)}</p>
@@ -918,9 +1257,9 @@ function renderTraslados(data) {
                     <span class="font-medium text-blue-600">${t.destino_nombre || t.bodega_destino}</span>
                 </div>
                 <div class="flex items-center gap-4 mt-1 text-xs text-gray-500">
-                    <span>Cantidad: <strong>${Math.round(t.cantidad_sugerida)}</strong></span>
-                    <span>Origen: ${Math.round(t.dias_inv_origen)}d</span>
-                    <span>Destino: ${t.dias_inv_destino.toFixed(1)}d</span>
+                    <span>Cantidad: <strong>${formatNumber(t.cantidad_sugerida)}</strong></span>
+                    <span>Origen: ${diasMesesPlain(t.dias_inv_origen)}</span>
+                    <span>Destino: ${diasMesesPlain(t.dias_inv_destino)}</span>
                     ${t.regional ? `<span>· ${t.regional}</span>` : ''}
                 </div>
             </div>
@@ -946,10 +1285,24 @@ async function updateTraslado(id, estado) {
 async function loadCompras() {
     const prioridad = document.getElementById('filtro-compra-prioridad').value;
     const marca = document.getElementById('filtro-compra-marca').value;
-    let qs = '?limit=100';
+    let qs = `?limit=100&${buildGlobalQS()}`;
     if (prioridad) qs += `&prioridad=${prioridad}`;
     if (marca) qs += `&marca=${marca}`;
-    try { renderCompras(await api('/compras' + qs)); } catch (e) { console.error(e); }
+    try {
+        cachedCompras = await api('/compras' + qs);
+        sortAndRenderCompras();
+    } catch (e) { console.error(e); }
+}
+
+function sortAndRenderCompras() {
+    const orden = document.getElementById('filtro-compra-orden').value;
+    const sorted = [...cachedCompras];
+    if (orden === 'stock_desc') sorted.sort((a, b) => b.stock_red - a.stock_red);
+    else if (orden === 'stock_asc') sorted.sort((a, b) => a.stock_red - b.stock_red);
+    else if (orden === 'valor_desc') sorted.sort((a, b) => b.valor_compra_estimado - a.valor_compra_estimado);
+    else if (orden === 'valor_asc') sorted.sort((a, b) => a.valor_compra_estimado - b.valor_compra_estimado);
+    else if (orden === 'cant_desc') sorted.sort((a, b) => b.cantidad_sugerida - a.cantidad_sugerida);
+    renderCompras(sorted);
 }
 
 function renderCompras(data) {
@@ -1027,8 +1380,8 @@ function renderCompras(data) {
                     <th class="text-left py-3 px-4 font-medium text-gray-600">Marca</th>
                     <th class="text-right py-3 px-4 font-medium text-gray-600">Stock Red</th>
                     <th class="text-right py-3 px-4 font-medium text-gray-600">Cant. Sugerida</th>
-                    <th class="text-right py-3 px-4 font-medium text-gray-600">Cobertura Actual</th>
-                    <th class="text-right py-3 px-4 font-medium text-gray-600">Cob. Objetivo</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Cob. Actual (d/m)</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Cob. Obj. (d/m)</th>
                     <th class="text-right py-3 px-4 font-medium text-gray-600">Valor Est.</th>
                     <th class="text-center py-3 px-4 font-medium text-gray-600">Prioridad</th>
                 </tr></thead>
@@ -1041,8 +1394,8 @@ function renderCompras(data) {
                         <td class="py-2.5 px-4 text-xs text-gray-600">${c.marca_nombre || '-'} <span class="text-gray-400">${c.marca_clasificacion || ''}</span></td>
                         <td class="py-2.5 px-4 text-right text-xs">${formatNumber(c.stock_actual_red)}</td>
                         <td class="py-2.5 px-4 text-right text-xs font-semibold text-blue-600">${formatNumber(c.cantidad_sugerida)}</td>
-                        <td class="py-2.5 px-4 text-right text-xs ${c.dias_cobertura_actual < 7 ? 'text-red-600 font-semibold' : ''}">${Math.round(c.dias_cobertura_actual)}d</td>
-                        <td class="py-2.5 px-4 text-right text-xs text-gray-500">${Math.round(c.dias_cobertura_objetivo)}d</td>
+                        <td class="py-2.5 px-4 text-right text-xs ${c.dias_cobertura_actual < 7 ? 'text-red-600 font-semibold' : ''}">${diasMesesPlain(c.dias_cobertura_actual)}</td>
+                        <td class="py-2.5 px-4 text-right text-xs text-gray-500">${diasMesesPlain(c.dias_cobertura_objetivo)}</td>
                         <td class="py-2.5 px-4 text-right text-xs">${formatCurrency(c.valor_compra_estimado)}</td>
                         <td class="py-2.5 px-4 text-center">${badge(c.prioridad, c.prioridad)}</td>
                     </tr>
@@ -1067,10 +1420,8 @@ function switchAlmacenesView(view) {
 
 async function loadAlmacenes() {
     const tipo = document.getElementById('filtro-almacen-tipo').value;
-    const regional = getRegional();
-    let qs = '?';
+    let qs = `?${buildGlobalQS()}`;
     if (tipo) qs += `tipo=${tipo}&`;
-    if (regional) qs += `regional=${regional}&`;
     try {
         if (almacenesView === 'cards') {
             const resp = await api('/almacenes/resumen' + qs);
@@ -1105,7 +1456,7 @@ function renderAlmacenesCards(data, invTotal) {
                 <div class="flex justify-between"><span class="text-xs text-gray-500">Ventas 30 días</span><span class="text-sm font-semibold text-blue-600">${formatCurrency(a.ventas_30d_valor)}</span></div>
                 <div class="flex justify-between"><span class="text-xs text-gray-500">Alertas</span>
                     <span class="text-sm font-semibold ${a.alertas_criticas > 0 ? 'text-red-600' : ''}">${a.alertas_total}
-                        <span class="text-[10px] font-normal text-gray-400">(${a.stock_critico} crít · ${a.stock_bajo} bajo · ${a.sobreinventario} sobre)</span>
+                        <span class="text-[10px] font-normal text-gray-400">(${a.stock_critico} crít · ${a.stock_bajo} bajo · ${a.sobreinventario} sobre · ${a.sin_rotacion || 0} s/rot)</span>
                     </span>
                 </div>
                 ${a.valor_inventario > 0 ? `
@@ -1135,7 +1486,7 @@ function renderAlmacenes(data) {
                     <th class="text-right py-3 px-4 font-medium text-gray-600">Productos</th>
                     <th class="text-right py-3 px-4 font-medium text-gray-600">Unidades</th>
                     <th class="text-right py-3 px-4 font-medium text-gray-600">Valor</th>
-                    <th class="text-right py-3 px-4 font-medium text-gray-600">Días Inv.</th>
+                    <th class="text-right py-3 px-4 font-medium text-gray-600">Días / Meses Inv.</th>
                 </tr></thead>
                 <tbody>${data.map(a => `
                     <tr class="border-b border-gray-50 hover:bg-gray-50">
@@ -1146,7 +1497,7 @@ function renderAlmacenes(data) {
                         <td class="py-2.5 px-4 text-right text-xs">${formatCurrency(a.valor_inventario)}</td>
                         <td class="py-2.5 px-4 text-right"><span class="px-2 py-0.5 rounded text-xs font-medium ${
                             a.dias_inv_promedio < 15 ? 'bg-red-100 text-red-700' : a.dias_inv_promedio < 30 ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-                        }">${a.dias_inv_promedio ? Math.round(a.dias_inv_promedio) : '-'}</span></td>
+                        }">${a.dias_inv_promedio ? diasMesesPlain(a.dias_inv_promedio) : '-'}</span></td>
                     </tr>
                 `).join('')}</tbody>
             </table>
@@ -1200,7 +1551,7 @@ async function openProductoDetalle(refEncoded) {
                 <div><p class="text-xs text-gray-500">Referencia</p><p class="text-sm font-medium">${p.referencia}</p></div>
                 <div><p class="text-xs text-gray-500">Marca</p><p class="text-sm font-medium">${p.marca || '-'} <span class="text-gray-400">${p.categoria || ''} ${p.clasificacion || ''}</span></p></div>
                 <div><p class="text-xs text-gray-500">Stock Total</p><p class="text-sm font-bold text-blue-600">${formatNumber(data.almacenes.reduce((s,a) => s + a.stock, 0))}</p></div>
-                <div><p class="text-xs text-gray-500">Cobertura Obj.</p><p class="text-sm font-medium">${p.dias_cobertura || '-'} días</p></div>
+                <div><p class="text-xs text-gray-500">Cobertura Obj.</p><p class="text-sm font-medium">${p.dias_cobertura ? diasMesesPlain(p.dias_cobertura) : '-'}</p></div>
             </div>
             <h4 class="font-semibold text-sm text-gray-700 mb-3">Stock por Almacén (${data.almacenes.length})</h4>
             <div class="bg-gray-50 rounded-lg overflow-x-auto mb-6">
@@ -1210,7 +1561,7 @@ async function openProductoDetalle(refEncoded) {
                         <th class="text-left py-2 px-3 font-medium text-gray-600">Regional</th>
                         <th class="text-right py-2 px-3 font-medium text-gray-600">Stock</th>
                         <th class="text-right py-2 px-3 font-medium text-gray-600">Vta. Diaria</th>
-                        <th class="text-right py-2 px-3 font-medium text-gray-600">Días Inv.</th>
+                        <th class="text-right py-2 px-3 font-medium text-gray-600">Días / Meses Inv.</th>
                         <th class="text-center py-2 px-3 font-medium text-gray-600">Estado</th>
                     </tr></thead>
                     <tbody>${data.almacenes.map(a => `
@@ -1219,7 +1570,7 @@ async function openProductoDetalle(refEncoded) {
                             <td class="py-2 px-3 text-gray-500">${a.regional || '-'}</td>
                             <td class="py-2 px-3 text-right font-semibold">${formatNumber(a.stock)}</td>
                             <td class="py-2 px-3 text-right">${a.venta_diaria.toFixed(2)}</td>
-                            <td class="py-2 px-3 text-right">${a.dias_inventario < 9999 ? Math.round(a.dias_inventario) : '∞'}</td>
+                            <td class="py-2 px-3 text-right">${diasMesesPlain(a.dias_inventario)}</td>
                             <td class="py-2 px-3 text-center"><span class="font-medium ${estadoColors[a.estado] || 'text-gray-500'}">${a.estado}</span></td>
                         </tr>
                     `).join('')}</tbody>
@@ -1276,12 +1627,10 @@ function setAnalisisRango(dias) {
 
 async function loadAnalisis() {
     initAnalisisFechas();
-    const regional = getRegional();
     const tipo = document.getElementById('filtro-analisis-tipo').value;
     const desde = document.getElementById('filtro-analisis-desde').value;
     const hasta = document.getElementById('filtro-analisis-hasta').value;
-    let qs = '?';
-    if (regional) qs += `regional=${regional}&`;
+    let qs = `?${buildGlobalQS()}`;
     if (tipo) qs += `tipo=${tipo}&`;
     if (desde) qs += `fecha_desde=${desde}&`;
     if (hasta) qs += `fecha_hasta=${hasta}&`;
@@ -1372,7 +1721,7 @@ function renderAnalisis(data) {
                         <td class="py-2 px-3 font-medium text-gray-900">${x.nombre || 'Sin marca'}</td>
                         <td class="py-2 px-3 text-center"><span class="px-1.5 py-0.5 rounded text-[10px] ${x.categoria === 'PRINCIPAL' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}">${x.categoria || '-'}</span></td>
                         <td class="py-2 px-3 text-center font-bold ${x.clasificacion === 'A' ? 'text-green-600' : x.clasificacion === 'B' ? 'text-blue-600' : x.clasificacion === 'C' ? 'text-yellow-600' : 'text-gray-400'}">${x.clasificacion || '-'}</td>
-                        <td class="py-2 px-3 text-right">${x.productos}</td>
+                        <td class="py-2 px-3 text-right">${formatNumber(x.productos)}</td>
                         <td class="py-2 px-3 text-right">${formatNumber(x.unidades)}</td>
                         <td class="py-2 px-3 text-right font-medium">${formatCurrency(x.valor)}</td>
                         <td class="py-2 px-3 text-right">
@@ -1395,7 +1744,7 @@ function renderAnalisis(data) {
 // ============================================
 async function loadRegionales() {
     try {
-        const resp = await api('/regionales');
+        const resp = await api('/regionales?' + buildGlobalQS());
         renderRegionales(resp.regionales, resp.inventario_total);
     } catch (e) { console.error(e); }
 }
@@ -1421,8 +1770,8 @@ function renderRegionales(data, invTotal) {
             <div class="p-5 space-y-3">
                 <div class="flex justify-between"><span class="text-xs text-gray-500">Valor Inventario</span><span class="text-sm font-semibold">${formatCurrency(r.valor_inventario)}</span></div>
                 <div class="flex justify-between"><span class="text-xs text-gray-500">Ventas 30 días</span><span class="text-sm font-semibold text-blue-600">${formatCurrency(r.ventas_30d)}</span></div>
-                <div class="flex justify-between"><span class="text-xs text-gray-500">Alertas Pendientes</span><span class="text-sm font-semibold ${r.alertas_criticas > 0 ? 'text-red-600' : ''}">${r.alertas_pendientes} <span class="text-xs font-normal text-gray-400">(${r.alertas_criticas} críticas)</span></span></div>
-                <div class="flex justify-between"><span class="text-xs text-gray-500">Traslados Pendientes</span><span class="text-sm font-semibold text-purple-600">${r.traslados_pendientes}</span></div>
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Alertas Pendientes</span><span class="text-sm font-semibold ${r.alertas_criticas > 0 ? 'text-red-600' : ''}">${formatNumber(r.alertas_pendientes)} <span class="text-xs font-normal text-gray-400">(${formatNumber(r.alertas_criticas)} críticas)</span></span></div>
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Traslados Pendientes</span><span class="text-sm font-semibold text-purple-600">${formatNumber(r.traslados_pendientes)}</span></div>
                 ${r.ventas_30d && r.valor_inventario ? `
                 <div class="pt-2 border-t border-gray-100">
                     <div class="flex justify-between items-center">
@@ -1439,15 +1788,11 @@ function renderRegionales(data, invTotal) {
 // EXPORT
 // ============================================
 async function exportData(tipo) {
-    const regional = getRegional();
-    let qs = `?limit=1000`;
-    if (regional) qs += `&regional=${regional}`;
+    let qs = `?limit=1000&${buildGlobalQS()}`;
     if (tipo === 'alertas') {
         qs += `&estado=${document.getElementById('filtro-alerta-estado').value}`;
         const t = document.getElementById('filtro-alerta-tipo').value;
-        const n = document.getElementById('filtro-alerta-nivel').value;
         if (t) qs += `&tipo=${t}`;
-        if (n) qs += `&nivel=${n}`;
     }
     if (tipo === 'traslados') {
         qs += `&estado=${document.getElementById('filtro-traslado-estado').value}`;
@@ -1472,18 +1817,195 @@ async function exportData(tipo) {
 }
 
 // ============================================
+// GESTIÓN DE USUARIOS (ADMIN)
+// ============================================
+async function loadUsuarios() {
+    if (!currentUser || currentUser.rol !== 'admin') return;
+    try {
+        const users = await api('/admin/usuarios');
+        renderUsuariosTable(users);
+    } catch (e) { console.error('Error cargando usuarios:', e); }
+}
+
+function renderUsuariosTable(users) {
+    const rolColors = { admin: 'bg-purple-100 text-purple-700', manager: 'bg-blue-100 text-blue-700', viewer: 'bg-gray-100 text-gray-600' };
+    const rolLabels = { admin: 'Admin', manager: 'Manager', viewer: 'Viewer' };
+    const modIcons = {
+        dashboard: 'layout-dashboard', alertas: 'alert-triangle', traslados: 'truck',
+        compras: 'shopping-cart', almacenes: 'warehouse', analisis: 'pie-chart',
+        productos: 'search', regionales: 'map-pin'
+    };
+
+    const tbody = document.getElementById('usuarios-tbody');
+    tbody.innerHTML = users.map(u => {
+        const isMe = u.id === currentUser.id;
+        const modBadges = (u.modulos || []).map(m =>
+            `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px]"><i data-lucide="${modIcons[m] || 'circle'}" class="w-2.5 h-2.5"></i>${m}</span>`
+        ).join(' ');
+
+        return `<tr class="hover:bg-gray-50 ${!u.activo ? 'opacity-50' : ''}">
+            <td class="px-4 py-3">
+                <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full ${isMe ? 'bg-blue-600' : 'bg-gray-300'} flex items-center justify-center text-white text-xs font-bold">
+                        ${(u.nombre || u.username)[0].toUpperCase()}
+                    </div>
+                    <span class="font-medium text-gray-800">${u.username}</span>
+                    ${isMe ? '<span class="text-[9px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full font-medium">Tú</span>' : ''}
+                </div>
+            </td>
+            <td class="px-4 py-3 text-gray-600">${u.nombre || '-'}</td>
+            <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium ${rolColors[u.rol] || ''}">${rolLabels[u.rol] || u.rol}</span></td>
+            <td class="px-4 py-3"><div class="flex flex-wrap gap-1 max-w-xs">${u.rol === 'admin' ? '<span class="text-[10px] text-purple-600 font-medium">Todos los módulos</span>' : modBadges || '<span class="text-[10px] text-gray-400">Sin módulos</span>'}</div></td>
+            <td class="px-4 py-3 text-center">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${u.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}">
+                    <span class="w-1.5 h-1.5 rounded-full ${u.activo ? 'bg-emerald-500' : 'bg-red-500'}"></span>
+                    ${u.activo ? 'Activo' : 'Inactivo'}
+                </span>
+            </td>
+            <td class="px-4 py-3 text-center">
+                <div class="flex items-center justify-center gap-1">
+                    <button onclick="editUser(${u.id})" class="p-1.5 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600 transition-colors" title="Editar">
+                        <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button onclick="toggleUserActive(${u.id}, ${u.activo})" class="p-1.5 hover:bg-yellow-50 rounded-lg text-gray-400 hover:text-yellow-600 transition-colors" title="${u.activo ? 'Desactivar' : 'Activar'}">
+                        <i data-lucide="${u.activo ? 'user-x' : 'user-check'}" class="w-3.5 h-3.5"></i>
+                    </button>
+                    ${!isMe ? `<button onclick="deleteUser(${u.id}, '${u.username}')" class="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600 transition-colors" title="Eliminar">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    </button>` : ''}
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+    lucide.createIcons();
+}
+
+let editingUserData = null;
+
+function openUserModal(userData = null) {
+    editingUserData = userData;
+    const modal = document.getElementById('modal-usuario');
+    const title = document.getElementById('modal-user-title');
+    const btn = document.getElementById('btn-save-user');
+    const errEl = document.getElementById('user-modal-error');
+    errEl.classList.add('hidden');
+
+    document.getElementById('edit-user-id').value = userData ? userData.id : '';
+    document.getElementById('inp-username').value = userData ? userData.username : '';
+    document.getElementById('inp-username').disabled = !!userData;
+    document.getElementById('inp-password').value = '';
+    document.getElementById('inp-nombre').value = userData ? (userData.nombre || '') : '';
+    document.getElementById('inp-email').value = userData ? (userData.email || '') : '';
+    document.getElementById('inp-rol').value = userData ? userData.rol : 'viewer';
+    document.getElementById('pwd-hint').textContent = userData ? '(dejar vacío para no cambiar)' : '(requerida)';
+
+    title.textContent = userData ? 'Editar Usuario' : 'Nuevo Usuario';
+    btn.textContent = userData ? 'Guardar Cambios' : 'Crear Usuario';
+
+    const mods = userData ? (userData.modulos || []) : ['dashboard'];
+    document.querySelectorAll('.mod-check').forEach(cb => {
+        cb.checked = mods.includes(cb.value);
+    });
+
+    onRolChange();
+    modal.classList.remove('hidden');
+    lucide.createIcons();
+    if (!userData) document.getElementById('inp-username').focus();
+}
+
+function closeUserModal() {
+    document.getElementById('modal-usuario').classList.add('hidden');
+    editingUserData = null;
+}
+
+function onRolChange() {
+    const rol = document.getElementById('inp-rol').value;
+    const section = document.getElementById('modulos-section');
+    if (rol === 'admin') {
+        section.classList.add('opacity-50', 'pointer-events-none');
+        document.querySelectorAll('.mod-check').forEach(cb => cb.checked = true);
+    } else {
+        section.classList.remove('opacity-50', 'pointer-events-none');
+    }
+}
+
+async function saveUser() {
+    const errEl = document.getElementById('user-modal-error');
+    errEl.classList.add('hidden');
+    const editId = document.getElementById('edit-user-id').value;
+    const isEdit = !!editId;
+
+    const username = document.getElementById('inp-username').value.trim();
+    const password = document.getElementById('inp-password').value.trim();
+    const nombre = document.getElementById('inp-nombre').value.trim();
+    const email = document.getElementById('inp-email').value.trim();
+    const rol = document.getElementById('inp-rol').value;
+    const modulos = [...document.querySelectorAll('.mod-check:checked')].map(cb => cb.value);
+
+    if (!isEdit && (!username || !password)) {
+        errEl.textContent = 'Username y contraseña son requeridos';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    const payload = { nombre, email, rol, modulos };
+    if (!isEdit) { payload.username = username; payload.password = password; }
+    else if (password) { payload.password = password; }
+
+    try {
+        const url = isEdit ? `/admin/usuarios/${editId}` : '/admin/usuarios';
+        const method = isEdit ? 'PUT' : 'POST';
+        await api(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        closeUserModal();
+        loadUsuarios();
+    } catch (e) {
+        errEl.textContent = e.message || 'Error guardando usuario';
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function editUser(id) {
+    try {
+        const users = await api('/admin/usuarios');
+        const u = users.find(x => x.id === id);
+        if (u) openUserModal(u);
+    } catch (e) { alert('Error cargando usuario: ' + e.message); }
+}
+
+async function toggleUserActive(id, currentlyActive) {
+    if (!confirm(`¿${currentlyActive ? 'Desactivar' : 'Activar'} este usuario?`)) return;
+    try {
+        await api(`/admin/usuarios/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ activo: !currentlyActive })
+        });
+        loadUsuarios();
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function deleteUser(id, username) {
+    if (!confirm(`¿Eliminar permanentemente al usuario "${username}"? Esta acción no se puede deshacer.`)) return;
+    try {
+        await api(`/admin/usuarios/${id}`, { method: 'DELETE' });
+        loadUsuarios();
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ============================================
 // INIT
 // ============================================
 async function initApp() {
     try {
         filtros = await api('/filtros');
-        const sel = document.getElementById('global-regional');
-        sel.innerHTML = '<option value="">Todas las regionales</option>' +
-            filtros.regionales.map(r => `<option value="${r.codigo}">${r.nombre}</option>`).join('');
-        almacenListCache = filtros.almacenes;
-        renderAlmacenDropdown(filtros.almacenes);
-        const allMarcasHtml = filtros.marcas.map(m => `<option value="${m.codigo}">${m.nombre} (${m.categoria} ${m.clasificacion})</option>`).join('');
-        document.getElementById('global-marca').innerHTML = '<option value="">Todas las marcas</option>' + allMarcasHtml;
+        multiState.regional.items = filtros.regionales.map(r => ({ code: r.codigo, label: r.nombre, extra: '' }));
+        multiState.almacen.items = filtros.almacenes.map(a => ({ code: a.codigo, label: a.nombre, extra: a.regional }));
+        multiState.marca.items = filtros.marcas.map(m => ({ code: m.codigo, label: m.nombre, extra: m.categoria }));
+        multiState.tiporef.items = (filtros.tipos_referencia || []).map(t => ({ code: t.codigo, label: t.nombre, extra: `${t.cantidad} refs` }));
         const principalHtml = filtros.marcas.filter(m => m.categoria === 'PRINCIPAL').map(m => `<option value="${m.codigo}">${m.nombre} (${m.clasificacion})</option>`).join('');
         document.getElementById('filtro-compra-marca').innerHTML = '<option value="">Todas las marcas</option>' + principalHtml;
     } catch (e) { console.error('Error cargando filtros:', e); }

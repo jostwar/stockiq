@@ -60,7 +60,7 @@ def api_response(status_code, body):
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-            'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS'
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
         },
         'body': json.dumps(body, default=str)
     }
@@ -74,7 +74,7 @@ def csv_response(filename, csv_content):
             'Content-Disposition': f'attachment; filename="{filename}"',
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-            'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS'
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
         },
         'body': csv_content
     }
@@ -82,6 +82,43 @@ def csv_response(filename, csv_content):
 
 def safe_float(val):
     return float(val) if val is not None else 0
+
+
+def parse_multi(param_value):
+    """Parse comma-separated filter value into a list. Returns empty list if blank."""
+    if not param_value:
+        return []
+    return [v.strip() for v in param_value.split(',') if v.strip()]
+
+
+def multi_filter(column, values, params_list):
+    """Build a SQL IN clause for multiple values. Returns SQL string and appends to params_list."""
+    if not values:
+        return ""
+    placeholders = ','.join(['%s'] * len(values))
+    params_list.extend(values)
+    return f" AND {column} IN ({placeholders})"
+
+
+def obs_filter(ia_alias, tipos_ref, params_list):
+    """Build WHERE clause for tipo_ref (observacion) filter on inventario_actual.
+    'INVENTARIO' maps to NULL/empty; other values match exactly."""
+    if not tipos_ref:
+        return ""
+    has_inv = 'INVENTARIO' in tipos_ref
+    others = [t for t in tipos_ref if t != 'INVENTARIO']
+    parts = []
+    if has_inv and others:
+        placeholders = ','.join(['%s'] * len(others))
+        params_list.extend(others)
+        parts.append(f"(COALESCE({ia_alias}.observacion, '') = '' OR {ia_alias}.observacion IN ({placeholders}))")
+    elif has_inv:
+        parts.append(f"COALESCE({ia_alias}.observacion, '') = ''")
+    else:
+        placeholders = ','.join(['%s'] * len(others))
+        params_list.extend(others)
+        parts.append(f"{ia_alias}.observacion IN ({placeholders})")
+    return " AND " + parts[0]
 
 
 def hash_password(password):
@@ -111,10 +148,15 @@ def authenticate(event):
         WHERE s.token = %s AND s.expires_at > NOW() AND u.activo = true
     """, (token,))
     row = cur.fetchone()
-    conn.close()
     if not row:
+        conn.close()
         return None
-    return {'id': row[0], 'username': row[1], 'nombre': row[2], 'rol': row[3]}
+
+    uid = row[0]
+    cur.execute("SELECT modulo FROM usuario_permisos WHERE usuario_id = %s", (uid,))
+    modulos = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return {'id': uid, 'username': row[1], 'nombre': row[2], 'rol': row[3], 'modulos': modulos}
 
 
 def login(body):
@@ -142,12 +184,15 @@ def login(body):
     cur.execute("INSERT INTO sesiones (token, usuario_id, expires_at) VALUES (%s, %s, %s)",
                 (token, row[0], expires))
     cur.execute("DELETE FROM sesiones WHERE expires_at < NOW()")
+
+    cur.execute("SELECT modulo FROM usuario_permisos WHERE usuario_id = %s", (row[0],))
+    modulos = [r[0] for r in cur.fetchall()]
     conn.commit()
     conn.close()
 
     return api_response(200, {
         'token': token,
-        'user': {'id': row[0], 'username': row[1], 'nombre': row[2], 'rol': row[3]}
+        'user': {'id': row[0], 'username': row[1], 'nombre': row[2], 'rol': row[3], 'modulos': modulos}
     })
 
 
@@ -161,6 +206,151 @@ def logout(event):
         conn.commit()
         conn.close()
     return api_response(200, {'message': 'Sesión cerrada'})
+
+
+# ============================================
+# ADMIN: GESTIÓN DE USUARIOS
+# ============================================
+
+ALL_MODULES = ['dashboard', 'alertas', 'traslados', 'compras', 'almacenes', 'analisis', 'productos', 'regionales']
+
+
+def require_admin(user):
+    if user.get('rol') != 'admin':
+        return api_response(403, {'error': 'Solo administradores pueden gestionar usuarios'})
+    return None
+
+
+def get_usuarios(user):
+    denied = require_admin(user)
+    if denied:
+        return denied
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, nombre, email, rol, activo, created_at FROM usuarios ORDER BY id")
+    rows = cur.fetchall()
+    users = []
+    for r in rows:
+        cur.execute("SELECT modulo FROM usuario_permisos WHERE usuario_id = %s", (r[0],))
+        mods = [m[0] for m in cur.fetchall()]
+        users.append({
+            'id': r[0], 'username': r[1], 'nombre': r[2], 'email': r[3],
+            'rol': r[4], 'activo': r[5],
+            'created_at': r[6].isoformat() if r[6] else None,
+            'modulos': mods
+        })
+    conn.close()
+    return api_response(200, users)
+
+
+def crear_usuario(body, user):
+    denied = require_admin(user)
+    if denied:
+        return denied
+    data = json.loads(body) if isinstance(body, str) else (body or {})
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+    nombre = data.get('nombre', '').strip()
+    email = data.get('email', '').strip()
+    rol = data.get('rol', 'viewer').strip()
+    modulos = data.get('modulos', [])
+
+    if not username or not password:
+        return api_response(400, {'error': 'Username y password son requeridos'})
+    if len(password) < 4:
+        return api_response(400, {'error': 'La contraseña debe tener al menos 4 caracteres'})
+    if rol not in ('admin', 'manager', 'viewer'):
+        return api_response(400, {'error': 'Rol inválido. Opciones: admin, manager, viewer'})
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id FROM usuarios WHERE username = %s", (username,))
+    if cur.fetchone():
+        conn.close()
+        return api_response(409, {'error': f'El usuario "{username}" ya existe'})
+
+    pw_hash = hash_password(password)
+    cur.execute("""
+        INSERT INTO usuarios (username, password_hash, nombre, email, rol)
+        VALUES (%s, %s, %s, %s, %s) RETURNING id
+    """, (username, pw_hash, nombre or username, email or None, rol))
+    new_id = cur.fetchone()[0]
+
+    if rol == 'admin':
+        modulos = ALL_MODULES
+    for m in modulos:
+        if m in ALL_MODULES:
+            cur.execute("INSERT INTO usuario_permisos (usuario_id, modulo) VALUES (%s, %s) ON CONFLICT DO NOTHING", (new_id, m))
+
+    conn.commit()
+    conn.close()
+    return api_response(201, {'id': new_id, 'message': f'Usuario "{username}" creado'})
+
+
+def actualizar_usuario(usuario_id, body, user):
+    denied = require_admin(user)
+    if denied:
+        return denied
+    data = json.loads(body) if isinstance(body, str) else (body or {})
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id, username, rol FROM usuarios WHERE id = %s", (int(usuario_id),))
+    existing = cur.fetchone()
+    if not existing:
+        conn.close()
+        return api_response(404, {'error': 'Usuario no encontrado'})
+
+    sets = []
+    params = []
+    if 'nombre' in data:
+        sets.append("nombre = %s"); params.append(data['nombre'])
+    if 'email' in data:
+        sets.append("email = %s"); params.append(data['email'])
+    if 'rol' in data and data['rol'] in ('admin', 'manager', 'viewer'):
+        sets.append("rol = %s"); params.append(data['rol'])
+    if 'activo' in data:
+        sets.append("activo = %s"); params.append(bool(data['activo']))
+    if 'password' in data and data['password'].strip():
+        pw = data['password'].strip()
+        if len(pw) < 4:
+            conn.close()
+            return api_response(400, {'error': 'La contraseña debe tener al menos 4 caracteres'})
+        sets.append("password_hash = %s"); params.append(hash_password(pw))
+
+    if sets:
+        sets.append("updated_at = NOW()")
+        params.append(int(usuario_id))
+        cur.execute(f"UPDATE usuarios SET {', '.join(sets)} WHERE id = %s", tuple(params))
+
+    if 'modulos' in data:
+        new_rol = data.get('rol', existing[2])
+        modulos = ALL_MODULES if new_rol == 'admin' else data['modulos']
+        cur.execute("DELETE FROM usuario_permisos WHERE usuario_id = %s", (int(usuario_id),))
+        for m in modulos:
+            if m in ALL_MODULES:
+                cur.execute("INSERT INTO usuario_permisos (usuario_id, modulo) VALUES (%s, %s)", (int(usuario_id), m))
+
+    conn.commit()
+    conn.close()
+    return api_response(200, {'message': 'Usuario actualizado'})
+
+
+def eliminar_usuario(usuario_id, user):
+    denied = require_admin(user)
+    if denied:
+        return denied
+    uid = int(usuario_id)
+    if uid == user['id']:
+        return api_response(400, {'error': 'No puedes eliminar tu propio usuario'})
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM usuarios WHERE id = %s", (uid,))
+    conn.commit()
+    conn.close()
+    return api_response(200, {'message': 'Usuario eliminado'})
 
 
 # ============================================
@@ -180,12 +370,21 @@ def get_filtros():
     cur.execute("SELECT codigo, nombre, categoria, clasificacion FROM marcas WHERE activo = true ORDER BY categoria, clasificacion, nombre")
     marcas = [{'codigo': r[0], 'nombre': r[1], 'categoria': r[2], 'clasificacion': r[3]} for r in cur.fetchall()]
 
+    cur.execute("""
+        SELECT COALESCE(NULLIF(TRIM(observacion), ''), 'INVENTARIO') as tipo, COUNT(DISTINCT referencia) as refs
+        FROM inventario_actual
+        GROUP BY COALESCE(NULLIF(TRIM(observacion), ''), 'INVENTARIO')
+        ORDER BY refs DESC
+    """)
+    tipos_ref = [{'codigo': r[0], 'nombre': r[0], 'cantidad': r[1]} for r in cur.fetchall()]
+
     conn.close()
     return {
         'regionales': regionales,
         'almacenes': almacenes,
         'marcas': marcas,
-        'tipos_alerta': ['STOCK_CRITICO', 'STOCK_BAJO', 'SOBREINVENTARIO', 'BAJA_ROTACION'],
+        'tipos_referencia': tipos_ref,
+        'tipos_alerta': ['STOCK_CRITICO', 'STOCK_BAJO', 'SOBREINVENTARIO', 'BAJA_ROTACION', 'SIN_ROTACION', 'STOCK_AGOTADO'],
         'niveles_alerta': ['CRITICO', 'ALTO', 'MEDIO', 'BAJO'],
         'prioridades': ['URGENTE', 'ALTA', 'MEDIA', 'BAJA']
     }
@@ -196,8 +395,10 @@ def get_filtros():
 # ============================================
 
 def get_kpis(params):
-    regional = params.get('regional')
-    marca = params.get('marca')
+    regionales = parse_multi(params.get('regional'))
+    marcas = parse_multi(params.get('marca'))
+    almacenes_f = parse_multi(params.get('almacen'))
+    tipos_ref = parse_multi(params.get('tipo_ref'))
     conn = get_db()
     cur = conn.cursor()
 
@@ -209,14 +410,14 @@ def get_kpis(params):
         JOIN almacenes a ON a.codigo = ia.bodega_codigo AND a.tipo = 'Venta'
     """
     inv_p = []
-    conditions = []
-    if regional:
-        conditions.append("a.regional = %s"); inv_p.append(regional)
-    if marca:
+    if marcas:
         inv_q += " JOIN productos p ON p.referencia = ia.referencia"
-        conditions.append("p.marca_codigo = %s"); inv_p.append(marca)
-    if conditions:
-        inv_q += " WHERE " + " AND ".join(conditions)
+    inv_q += " WHERE 1=1"
+    inv_q += multi_filter("a.regional", regionales, inv_p)
+    inv_q += multi_filter("ia.bodega_codigo", almacenes_f, inv_p)
+    inv_q += obs_filter("ia", tipos_ref, inv_p)
+    if marcas:
+        inv_q += multi_filter("p.marca_codigo", marcas, inv_p)
     cur.execute(inv_q, tuple(inv_p))
     r = cur.fetchone()
     inventario = {
@@ -224,48 +425,66 @@ def get_kpis(params):
         'total_unidades': safe_float(r[2]), 'valor_inventario': safe_float(r[3])
     }
 
+    # Tarjeta PROYECTOS: items con observacion = 'PROYECTOS'
+    proy_q = """
+        SELECT COUNT(DISTINCT ia.referencia || '-' || ia.bodega_codigo),
+               COALESCE(SUM(ia.cantidad), 0), COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
+        FROM inventario_actual ia
+        JOIN almacenes a ON a.codigo = ia.bodega_codigo AND a.tipo = 'Venta'
+    """
+    proy_p = []
+    if marcas:
+        proy_q += " JOIN productos p ON p.referencia = ia.referencia"
+    proy_q += " WHERE ia.observacion = 'PROYECTOS' AND ia.cantidad > 0"
+    proy_q += multi_filter("a.regional", regionales, proy_p)
+    proy_q += multi_filter("ia.bodega_codigo", almacenes_f, proy_p)
+    proy_q += obs_filter("ia", tipos_ref, proy_p)
+    if marcas:
+        proy_q += multi_filter("p.marca_codigo", marcas, proy_p)
+    cur.execute(proy_q, tuple(proy_p))
+    rp = cur.fetchone()
+    proyectos = {
+        'items': rp[0], 'unidades': safe_float(rp[1]), 'valor': safe_float(rp[2])
+    }
+
     d30 = date.today() - timedelta(days=30)
-    if regional:
-        cur.execute("""
-            SELECT COUNT(*), COALESCE(SUM(v.cantidad), 0), COALESCE(SUM(v.valor_total), 0)
-            FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
-            WHERE v.fecha >= %s AND a.regional = %s
-        """, (d30, regional))
-    else:
-        cur.execute("""
-            SELECT COUNT(*), COALESCE(SUM(cantidad), 0), COALESCE(SUM(valor_total), 0)
-            FROM ventas WHERE fecha >= %s
-        """, (d30,))
+    v_q = """SELECT COUNT(*), COALESCE(SUM(v.cantidad), 0), COALESCE(SUM(v.valor_total), 0)
+             FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
+             WHERE v.fecha >= %s"""
+    v_p = [d30]
+    v_q += multi_filter("a.regional", regionales, v_p)
+    v_q += multi_filter("v.bodega_codigo", almacenes_f, v_p)
+    if tipos_ref:
+        v_q += " AND EXISTS (SELECT 1 FROM inventario_actual _tr WHERE _tr.referencia = v.referencia"
+        v_q += obs_filter("_tr", tipos_ref, v_p) + ")"
+    cur.execute(v_q, tuple(v_p))
     r = cur.fetchone()
     ventas = {'transacciones': r[0], 'unidades': safe_float(r[1]), 'valor': safe_float(r[2])}
 
-    if regional:
-        cur.execute("""
-            SELECT COUNT(*) FILTER (WHERE al.tipo_alerta = 'STOCK_CRITICO'),
-                   COUNT(*) FILTER (WHERE al.tipo_alerta = 'STOCK_BAJO'),
-                   COUNT(*) FILTER (WHERE al.tipo_alerta = 'SOBREINVENTARIO'),
-                   COUNT(*)
-            FROM alertas al JOIN almacenes a ON a.codigo = al.bodega_codigo
-            WHERE al.estado = 'PENDIENTE' AND a.regional = %s
-        """, (regional,))
-    else:
-        cur.execute("""
-            SELECT COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_CRITICO'),
-                   COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_BAJO'),
-                   COUNT(*) FILTER (WHERE tipo_alerta = 'SOBREINVENTARIO'),
-                   COUNT(*)
-            FROM alertas WHERE estado = 'PENDIENTE'
-        """)
+    al_q = """SELECT COUNT(*) FILTER (WHERE al.tipo_alerta = 'STOCK_CRITICO'),
+                     COUNT(*) FILTER (WHERE al.tipo_alerta = 'STOCK_BAJO'),
+                     COUNT(*) FILTER (WHERE al.tipo_alerta = 'SOBREINVENTARIO'),
+                     COUNT(*) FILTER (WHERE al.tipo_alerta = 'SIN_ROTACION'),
+                     COUNT(*) FILTER (WHERE al.tipo_alerta = 'STOCK_AGOTADO'),
+                     COUNT(*)
+              FROM alertas al JOIN almacenes a ON a.codigo = al.bodega_codigo
+              WHERE al.estado = 'PENDIENTE'"""
+    al_p = []
+    al_q += multi_filter("a.regional", regionales, al_p)
+    al_q += multi_filter("al.bodega_codigo", almacenes_f, al_p)
+    if tipos_ref:
+        al_q += " AND EXISTS (SELECT 1 FROM inventario_actual _tr WHERE _tr.referencia = al.referencia AND _tr.bodega_codigo = al.bodega_codigo"
+        al_q += obs_filter("_tr", tipos_ref, al_p) + ")"
+    cur.execute(al_q, tuple(al_p))
     r = cur.fetchone()
-    alertas = {'criticas': r[0], 'bajas': r[1], 'sobreinventario': r[2], 'total': r[3]}
+    alertas = {'criticas': r[0], 'bajas': r[1], 'sobreinventario': r[2], 'sin_rotacion': r[3], 'agotado': r[4], 'total': r[5]}
 
-    if regional:
-        cur.execute("SELECT COUNT(*) FROM recomendaciones_traslado WHERE estado = 'PENDIENTE' AND regional_destino = %s", (regional,))
-    else:
-        cur.execute("SELECT COUNT(*) FROM recomendaciones_traslado WHERE estado = 'PENDIENTE'")
+    tr_q = "SELECT COUNT(*) FROM recomendaciones_traslado WHERE estado = 'PENDIENTE'"
+    tr_p = []
+    tr_q += multi_filter("regional_destino", regionales, tr_p)
+    cur.execute(tr_q, tuple(tr_p))
     traslados_pendientes = cur.fetchone()[0]
 
-    # Compras pendientes
     cur.execute("SELECT COUNT(*), COALESCE(SUM(valor_compra_estimado), 0) FROM recomendaciones_compra WHERE estado = 'PENDIENTE'")
     r = cur.fetchone()
     if r[0] > 0:
@@ -292,85 +511,122 @@ def get_kpis(params):
             LEFT JOIN costo_ref cr ON cr.referencia=vr.referencia
             LEFT JOIN costo_venta cv ON cv.referencia=vr.referencia
             WHERE COALESCE(sr.st,0) < (30+15)*vr.vd
+              AND NOT EXISTS (
+                  SELECT 1 FROM inventario_actual iax
+                  WHERE iax.referencia = vr.referencia AND iax.observacion = 'PROYECTOS'
+              )
         """, (d30, d30))
         cr = cur.fetchone()
         compras = {'total': cr[0], 'valor_estimado': safe_float(cr[1])}
 
-    # Salud del inventario: desglose por tipo con valor y % sobre total
-    salud_join = """
-        FROM inventario_actual ia
-        JOIN almacenes a ON a.codigo = ia.bodega_codigo AND a.tipo = 'Venta'
-    """
-    salud_where = []
-    salud_params = []
-    if regional:
-        salud_where.append("a.regional = %s"); salud_params.append(regional)
-    if marca:
-        salud_join += " JOIN productos p ON p.referencia = ia.referencia"
-        salud_where.append("p.marca_codigo = %s"); salud_params.append(marca)
-    salud_base = salud_join + (" WHERE " + " AND ".join(salud_where) if salud_where else "")
+    # Salud del inventario: clasificación MUTUAMENTE EXCLUYENTE
+    salud_extra_join = ""
+    salud_params = [d30, d30]
+    salud_filter = ""
+    if marcas:
+        salud_extra_join = " JOIN productos p ON p.referencia = ia.referencia"
+        salud_filter += multi_filter("p.marca_codigo", marcas, salud_params)
+    salud_filter += multi_filter("a.regional", regionales, salud_params)
+    salud_filter += multi_filter("ia.bodega_codigo", almacenes_f, salud_params)
+    salud_filter += obs_filter("ia", tipos_ref, salud_params)
 
-    # Total items (producto-almacen) y valor
-    cur.execute(f"SELECT COUNT(*), COALESCE(SUM(ia.cantidad * ia.valor_costo), 0) {salud_base} AND ia.cantidad > 0" if salud_where else
-                f"SELECT COUNT(*), COALESCE(SUM(ia.cantidad * ia.valor_costo), 0) {salud_base} WHERE ia.cantidad > 0",
-                tuple(salud_params))
-    sr = cur.fetchone()
-    total_items = sr[0]
-    total_valor_salud = safe_float(sr[1])
-
-    # Items con alerta pendiente por tipo
-    for tipo_al in ['STOCK_CRITICO', 'STOCK_BAJO', 'SOBREINVENTARIO']:
-        alert_q = f"""
-            SELECT COUNT(DISTINCT (ia.referencia, ia.bodega_codigo)),
-                   COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
-            {salud_join}
-            JOIN alertas al ON al.referencia = ia.referencia AND al.bodega_codigo = ia.bodega_codigo
-                AND al.tipo_alerta = %s AND al.estado = 'PENDIENTE'
-        """
-        ap = [tipo_al] + salud_params
-        if salud_where:
-            alert_q += " WHERE " + " AND ".join(salud_where)
-        cur.execute(alert_q, tuple(ap))
-        ar = cur.fetchone()
-        alertas[f'{tipo_al.lower()}_items'] = ar[0]
-        alertas[f'{tipo_al.lower()}_valor'] = safe_float(ar[1])
-
-    # Stock sano: items con venta en 30d y SIN alerta pendiente
-    sano_q = f"""
-        SELECT COUNT(DISTINCT (ia.referencia, ia.bodega_codigo)),
-               COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
-        {salud_join}
-        JOIN ventas v ON v.referencia = ia.referencia AND v.bodega_codigo = ia.bodega_codigo AND v.fecha >= %s
-    """
-    sano_params = [d30] + salud_params
-    sano_conds = list(salud_where) + ["""
-        NOT EXISTS (
-            SELECT 1 FROM alertas al2
-            WHERE al2.referencia = ia.referencia AND al2.bodega_codigo = ia.bodega_codigo
-            AND al2.estado = 'PENDIENTE'
+    salud_q = f"""
+        WITH items AS (
+            SELECT ia.referencia, ia.bodega_codigo,
+                   ia.cantidad * ia.valor_costo AS valor,
+                   CASE
+                       WHEN ia.cantidad = 0 AND EXISTS (SELECT 1 FROM ventas v WHERE v.referencia = ia.referencia
+                           AND v.bodega_codigo = ia.bodega_codigo AND v.fecha >= %s) THEN 1
+                       WHEN EXISTS (SELECT 1 FROM alertas al WHERE al.referencia = ia.referencia
+                           AND al.bodega_codigo = ia.bodega_codigo AND al.tipo_alerta = 'STOCK_CRITICO' AND al.estado = 'PENDIENTE') THEN 2
+                       WHEN EXISTS (SELECT 1 FROM alertas al WHERE al.referencia = ia.referencia
+                           AND al.bodega_codigo = ia.bodega_codigo AND al.tipo_alerta = 'STOCK_BAJO' AND al.estado = 'PENDIENTE') THEN 3
+                       WHEN EXISTS (SELECT 1 FROM alertas al WHERE al.referencia = ia.referencia
+                           AND al.bodega_codigo = ia.bodega_codigo AND al.tipo_alerta = 'SOBREINVENTARIO' AND al.estado = 'PENDIENTE') THEN 4
+                       WHEN EXISTS (SELECT 1 FROM alertas al WHERE al.referencia = ia.referencia
+                           AND al.bodega_codigo = ia.bodega_codigo AND al.tipo_alerta = 'BAJA_ROTACION' AND al.estado = 'PENDIENTE') THEN 5
+                       WHEN ia.cantidad > 0 AND NOT EXISTS (SELECT 1 FROM ventas v WHERE v.referencia = ia.referencia
+                           AND v.bodega_codigo = ia.bodega_codigo AND v.fecha >= %s)
+                           THEN 6
+                       WHEN ia.cantidad > 0 THEN 7
+                       ELSE 6
+                   END AS cat_pri
+            FROM inventario_actual ia
+            JOIN almacenes a ON a.codigo = ia.bodega_codigo AND a.tipo = 'Venta'
+            {salud_extra_join}
+            WHERE ia.cantidad >= 0 {salud_filter}
+        ),
+        sku_cat AS (
+            SELECT referencia, SUM(valor) as valor, MIN(cat_pri) as cat_pri
+            FROM items GROUP BY referencia
         )
-    """, "ia.cantidad > 0"]
-    sano_q += " WHERE " + " AND ".join(sano_conds)
-    cur.execute(sano_q, tuple(sano_params))
-    sano_r = cur.fetchone()
-    salud = {
-        'total_items': total_items,
-        'total_valor': total_valor_salud,
-        'critico': {'items': alertas['stock_critico_items'], 'valor': alertas['stock_critico_valor'],
-                    'pct': round(alertas['stock_critico_valor'] / total_valor_salud * 100, 1) if total_valor_salud > 0 else 0},
-        'bajo': {'items': alertas['stock_bajo_items'], 'valor': alertas['stock_bajo_valor'],
-                 'pct': round(alertas['stock_bajo_valor'] / total_valor_salud * 100, 1) if total_valor_salud > 0 else 0},
-        'sobreinventario': {'items': alertas['sobreinventario_items'], 'valor': alertas['sobreinventario_valor'],
-                            'pct': round(alertas['sobreinventario_valor'] / total_valor_salud * 100, 1) if total_valor_salud > 0 else 0},
-        'sano': {'items': sano_r[0], 'valor': safe_float(sano_r[1]),
-                 'pct': round(safe_float(sano_r[1]) / total_valor_salud * 100, 1) if total_valor_salud > 0 else 0}
+        SELECT CASE cat_pri WHEN 1 THEN 'agotado' WHEN 2 THEN 'critico' WHEN 3 THEN 'bajo'
+                   WHEN 4 THEN 'sobreinventario' WHEN 5 THEN 'baja_rotacion'
+                   WHEN 6 THEN 'sin_rotacion' WHEN 7 THEN 'sano' END as categoria,
+               COUNT(*), COALESCE(SUM(valor), 0)
+        FROM sku_cat GROUP BY cat_pri
+    """
+    cur.execute(salud_q, tuple(salud_params))
+    salud_rows = cur.fetchall()
+
+    cats_data = {r[0]: {'skus': r[1], 'valor': safe_float(r[2])} for r in salud_rows}
+
+    agot_q = """SELECT COUNT(DISTINCT referencia) FROM alertas WHERE tipo_alerta = 'STOCK_AGOTADO' AND estado = 'PENDIENTE'"""
+    cur.execute(agot_q)
+    agot_count = cur.fetchone()[0]
+    existing_agot = cats_data.get('agotado', {'skus': 0, 'valor': 0})['skus']
+    if agot_count > existing_agot:
+        cats_data['agotado'] = {'skus': agot_count, 'valor': cats_data.get('agotado', {'valor': 0})['valor']}
+
+    total_skus = sum(c['skus'] for c in cats_data.values())
+    total_valor_salud = sum(c['valor'] for c in cats_data.values())
+
+    salud = {'total_skus': total_skus, 'total_valor': total_valor_salud}
+    for cat_key in ['critico', 'bajo', 'sobreinventario', 'baja_rotacion', 'sano', 'sin_rotacion', 'agotado']:
+        d = cats_data.get(cat_key, {'skus': 0, 'valor': 0})
+        salud[cat_key] = {
+            'skus': d['skus'], 'valor': d['valor'],
+            'pct': round(d['valor'] / total_valor_salud * 100, 1) if total_valor_salud > 0 else 0
+        }
+
+    # Venta perdida por existencia: productos con venta en 30d, no PROYECTOS, stock 0 o ausentes
+    vp_q = """
+        SELECT COUNT(DISTINCT vd.referencia || '-' || vd.bodega_codigo),
+               COALESCE(SUM(vd.venta_valor), 0),
+               COALESCE(SUM(vd.venta_uds), 0)
+        FROM (
+            SELECT v.referencia, v.bodega_codigo,
+                   SUM(v.valor_total) as venta_valor,
+                   SUM(v.cantidad) as venta_uds
+            FROM ventas v
+            JOIN almacenes a ON a.codigo = v.bodega_codigo AND a.tipo = 'Venta'
+            WHERE v.fecha >= %s
+    """
+    vp_p = [d30]
+    vp_q += multi_filter("a.regional", regionales, vp_p)
+    vp_q += multi_filter("v.bodega_codigo", almacenes_f, vp_p)
+    vp_q += """
+            GROUP BY v.referencia, v.bodega_codigo
+            HAVING SUM(v.cantidad) > 0
+        ) vd
+        LEFT JOIN inventario_actual ia ON ia.referencia = vd.referencia AND ia.bodega_codigo = vd.bodega_codigo
+        WHERE COALESCE(ia.cantidad, 0) = 0
+          AND NOT EXISTS (
+              SELECT 1 FROM inventario_actual iax
+              WHERE iax.referencia = vd.referencia AND iax.observacion = 'PROYECTOS'
+          )
+    """
+    cur.execute(vp_q, tuple(vp_p))
+    vp_r = cur.fetchone()
+    venta_perdida = {
+        'items': vp_r[0], 'valor': safe_float(vp_r[1]), 'unidades': safe_float(vp_r[2])
     }
 
     conn.close()
     return {
         'inventario': inventario, 'ventas_30d': ventas, 'alertas': alertas,
         'traslados_pendientes': traslados_pendientes, 'compras': compras,
-        'salud_inventario': salud
+        'salud_inventario': salud, 'proyectos': proyectos, 'venta_perdida': venta_perdida
     }
 
 
@@ -382,8 +638,10 @@ def get_alertas(params):
     limit = int(params.get('limit', 50))
     tipo = params.get('tipo')
     nivel = params.get('nivel')
-    regional = params.get('regional')
-    almacen = params.get('almacen')
+    regionales = parse_multi(params.get('regional'))
+    almacenes_f = parse_multi(params.get('almacen'))
+    marcas = parse_multi(params.get('marca'))
+    tipos_ref = parse_multi(params.get('tipo_ref'))
     estado = params.get('estado', 'PENDIENTE')
 
     conn = get_db()
@@ -393,10 +651,17 @@ def get_alertas(params):
                a.bodega_codigo, al.nombre, a.stock_actual, a.dias_inventario,
                a.venta_diaria, a.mensaje, a.fecha_generacion, a.estado,
                al.regional, a.marca_categoria, a.marca_clasificacion,
-               a.atendida_por, a.fecha_atencion
+               a.atendida_por, a.fecha_atencion, p.marca_codigo,
+               COALESCE(ia.cantidad * ia.valor_costo, 0) as valor_stock,
+               COALESCE(sn.stock_nacional, 0) as stock_nacional
         FROM alertas a
         LEFT JOIN productos p ON p.referencia = a.referencia
         LEFT JOIN almacenes al ON al.codigo = a.bodega_codigo
+        LEFT JOIN inventario_actual ia ON ia.referencia = a.referencia AND ia.bodega_codigo = a.bodega_codigo
+        LEFT JOIN (
+            SELECT referencia, SUM(cantidad) as stock_nacional
+            FROM inventario_actual GROUP BY referencia
+        ) sn ON sn.referencia = a.referencia
         WHERE 1=1
     """
     p = []
@@ -406,10 +671,10 @@ def get_alertas(params):
         query += " AND a.tipo_alerta = %s"; p.append(tipo)
     if nivel:
         query += " AND a.nivel = %s"; p.append(nivel)
-    if regional:
-        query += " AND al.regional = %s"; p.append(regional)
-    if almacen:
-        query += " AND a.bodega_codigo = %s"; p.append(almacen)
+    query += multi_filter("al.regional", regionales, p)
+    query += multi_filter("a.bodega_codigo", almacenes_f, p)
+    query += multi_filter("p.marca_codigo", marcas, p)
+    query += obs_filter("ia", tipos_ref, p)
     query += " ORDER BY a.fecha_generacion DESC LIMIT %s"
     p.append(limit)
 
@@ -426,7 +691,10 @@ def get_alertas(params):
         'estado': r[12], 'regional': r[13],
         'marca_categoria': r[14], 'marca_clasificacion': r[15],
         'atendida_por': r[16],
-        'fecha_atencion': r[17].isoformat() if r[17] else None
+        'fecha_atencion': r[17].isoformat() if r[17] else None,
+        'marca_codigo': r[18],
+        'valor_stock': safe_float(r[19]),
+        'stock_nacional': safe_float(r[20])
     } for r in rows]
 
 
@@ -466,7 +734,8 @@ def get_alertas_resumen():
 def get_traslados(params):
     limit = int(params.get('limit', 50))
     prioridad = params.get('prioridad')
-    regional = params.get('regional')
+    regionales = parse_multi(params.get('regional'))
+    tipos_ref = parse_multi(params.get('tipo_ref'))
     estado = params.get('estado', 'PENDIENTE')
 
     conn = get_db()
@@ -487,8 +756,10 @@ def get_traslados(params):
         query += " AND rt.estado = %s"; p.append(estado)
     if prioridad:
         query += " AND rt.prioridad = %s"; p.append(prioridad)
-    if regional:
-        query += " AND rt.regional_destino = %s"; p.append(regional)
+    query += multi_filter("rt.regional_destino", regionales, p)
+    if tipos_ref:
+        query += " AND EXISTS (SELECT 1 FROM inventario_actual _tr WHERE _tr.referencia = rt.referencia"
+        query += obs_filter("_tr", tipos_ref, p) + ")"
     query += " ORDER BY rt.dias_inv_destino ASC LIMIT %s"
     p.append(limit)
 
@@ -535,6 +806,8 @@ def get_compras(params):
     limit = int(params.get('limit', 50))
     prioridad = params.get('prioridad')
     marca = params.get('marca')
+    marcas = parse_multi(marca)
+    tipos_ref = parse_multi(params.get('tipo_ref'))
 
     conn = get_db()
     cur = conn.cursor()
@@ -558,8 +831,10 @@ def get_compras(params):
         p = []
         if prioridad:
             query += " AND rc.prioridad = %s"; p.append(prioridad)
-        if marca:
-            query += " AND rc.marca_codigo = %s"; p.append(marca)
+        query += multi_filter("rc.marca_codigo", marcas, p)
+        if tipos_ref:
+            query += " AND EXISTS (SELECT 1 FROM inventario_actual _tr WHERE _tr.referencia = rc.referencia"
+            query += obs_filter("_tr", tipos_ref, p) + ")"
         query += " ORDER BY rc.prioridad ASC, rc.dias_cobertura_actual ASC LIMIT %s"
         p.append(limit)
         cur.execute(query, tuple(p))
@@ -578,10 +853,10 @@ def get_compras(params):
         } for r in rows]
 
     # Cálculo en tiempo real: productos con venta pero stock insuficiente
-    return _compras_live(conn, cur, limit, prioridad, marca)
+    return _compras_live(conn, cur, limit, prioridad, marca, tipos_ref)
 
 
-def _compras_live(conn, cur, limit, prioridad_filter, marca_filter):
+def _compras_live(conn, cur, limit, prioridad_filter, marca_filter, tipos_ref=None):
     """Calcula recomendaciones de compra en tiempo real"""
     d30 = date.today() - timedelta(days=30)
 
@@ -648,11 +923,18 @@ def _compras_live(conn, cur, limit, prioridad_filter, marca_filter):
         LEFT JOIN costo_venta cv ON cv.referencia = vr.referencia
         WHERE COALESCE(sr.stock_total, 0) <
               (COALESCE(m.dias_cobertura_stock, 30) + COALESCE(m.lead_time_a_cedi, 15)) * vr.venta_diaria
+          AND NOT EXISTS (
+              SELECT 1 FROM inventario_actual iax
+              WHERE iax.referencia = vr.referencia AND iax.observacion = 'PROYECTOS'
+          )
     """
     params = [d30, d30]
     if marca_filter:
         query += " AND m.codigo = %s"
         params.append(marca_filter)
+    if tipos_ref:
+        query += " AND EXISTS (SELECT 1 FROM inventario_actual _tr WHERE _tr.referencia = vr.referencia"
+        query += obs_filter("_tr", tipos_ref, params) + ")"
 
     query += """ ORDER BY
         CASE WHEN COALESCE(sr.stock_total, 0) = 0 THEN 0 ELSE 1 END,
@@ -690,7 +972,7 @@ def _compras_live(conn, cur, limit, prioridad_filter, marca_filter):
 # ============================================
 
 def get_almacenes(params):
-    regional = params.get('regional')
+    regionales = parse_multi(params.get('regional'))
     tipo = params.get('tipo', 'Venta')
 
     conn = get_db()
@@ -708,8 +990,7 @@ def get_almacenes(params):
     p = []
     if tipo:
         query += " AND a.tipo = %s"; p.append(tipo)
-    if regional:
-        query += " AND a.regional = %s"; p.append(regional)
+    query += multi_filter("a.regional", regionales, p)
     query += " GROUP BY a.codigo, a.nombre, a.tipo, a.regional, a.es_cedi ORDER BY 8 DESC NULLS LAST"
 
     cur.execute(query, tuple(p))
@@ -728,24 +1009,21 @@ def get_almacenes(params):
 # ============================================
 
 def get_ventas_diarias(params):
-    regional = params.get('regional')
+    regionales = parse_multi(params.get('regional'))
+    almacenes_f = parse_multi(params.get('almacen'))
     dias = int(params.get('dias', 30))
     start = date.today() - timedelta(days=dias)
 
     conn = get_db()
     cur = conn.cursor()
-    if regional:
-        cur.execute("""
-            SELECT v.fecha, COUNT(*), COALESCE(SUM(v.cantidad), 0), COALESCE(SUM(v.valor_total), 0)
-            FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
-            WHERE v.fecha >= %s AND a.regional = %s
-            GROUP BY v.fecha ORDER BY v.fecha
-        """, (start, regional))
-    else:
-        cur.execute("""
-            SELECT fecha, COUNT(*), COALESCE(SUM(cantidad), 0), COALESCE(SUM(valor_total), 0)
-            FROM ventas WHERE fecha >= %s GROUP BY fecha ORDER BY fecha
-        """, (start,))
+    q = """SELECT v.fecha, COUNT(*), COALESCE(SUM(v.cantidad), 0), COALESCE(SUM(v.valor_total), 0)
+           FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
+           WHERE v.fecha >= %s"""
+    p = [start]
+    q += multi_filter("a.regional", regionales, p)
+    q += multi_filter("v.bodega_codigo", almacenes_f, p)
+    q += " GROUP BY v.fecha ORDER BY v.fecha"
+    cur.execute(q, tuple(p))
 
     rows = cur.fetchall()
     conn.close()
@@ -757,54 +1035,46 @@ def get_ventas_diarias(params):
 
 def get_eficiencia_diaria(params):
     """Ventas diarias vs valor inventario estimado de cada fecha"""
-    regional = params.get('regional')
+    regionales = parse_multi(params.get('regional'))
+    almacenes_f = parse_multi(params.get('almacen'))
+    tipos_ref = parse_multi(params.get('tipo_ref'))
     d30 = date.today() - timedelta(days=30)
 
     conn = get_db()
     cur = conn.cursor()
 
-    # Inventario actual (hoy)
-    if regional:
-        cur.execute("""
-            SELECT COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
-            FROM inventario_actual ia
-            JOIN almacenes a ON a.codigo = ia.bodega_codigo
-            WHERE a.regional = %s
-        """, (regional,))
-    else:
-        cur.execute("SELECT COALESCE(SUM(cantidad * valor_costo), 0) FROM inventario_actual")
+    inv_q = """SELECT COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
+               FROM inventario_actual ia JOIN almacenes a ON a.codigo = ia.bodega_codigo
+               WHERE a.tipo = 'Venta'"""
+    inv_p = []
+    inv_q += multi_filter("a.regional", regionales, inv_p)
+    inv_q += multi_filter("ia.bodega_codigo", almacenes_f, inv_p)
+    inv_q += obs_filter("ia", tipos_ref, inv_p)
+    cur.execute(inv_q, tuple(inv_p))
     valor_inventario_hoy = safe_float(cur.fetchone()[0])
 
-    # Ventas diarias (valor)
-    if regional:
-        cur.execute("""
-            SELECT v.fecha, COALESCE(SUM(v.valor_total), 0)
-            FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
-            WHERE v.fecha >= %s AND a.regional = %s
-            GROUP BY v.fecha ORDER BY v.fecha
-        """, (d30, regional))
-    else:
-        cur.execute("""
-            SELECT fecha, COALESCE(SUM(valor_total), 0)
-            FROM ventas WHERE fecha >= %s GROUP BY fecha ORDER BY fecha
-        """, (d30,))
+    v_q = """SELECT v.fecha, COALESCE(SUM(v.valor_total), 0)
+             FROM ventas v JOIN almacenes a ON a.codigo = v.bodega_codigo
+             WHERE v.fecha >= %s"""
+    v_p = [d30]
+    v_q += multi_filter("a.regional", regionales, v_p)
+    v_q += multi_filter("v.bodega_codigo", almacenes_f, v_p)
+    if tipos_ref:
+        v_q += " AND EXISTS (SELECT 1 FROM inventario_actual _tr WHERE _tr.referencia = v.referencia"
+        v_q += obs_filter("_tr", tipos_ref, v_p) + ")"
+    v_q += " GROUP BY v.fecha ORDER BY v.fecha"
+    cur.execute(v_q, tuple(v_p))
     rows = cur.fetchall()
 
-    # Snapshots reales (prioridad si existen)
-    if regional:
-        cur.execute("""
-            SELECT s.fecha_snapshot, COALESCE(SUM(s.cantidad * s.valor_costo), 0)
-            FROM inventario_snapshot s
-            JOIN almacenes a ON a.codigo = s.bodega_codigo
-            WHERE s.fecha_snapshot >= %s AND a.regional = %s
-            GROUP BY s.fecha_snapshot ORDER BY s.fecha_snapshot
-        """, (d30, regional))
-    else:
-        cur.execute("""
-            SELECT fecha_snapshot, COALESCE(SUM(cantidad * valor_costo), 0)
-            FROM inventario_snapshot WHERE fecha_snapshot >= %s
-            GROUP BY fecha_snapshot ORDER BY fecha_snapshot
-        """, (d30,))
+    s_q = """SELECT s.fecha_snapshot, COALESCE(SUM(s.cantidad * s.valor_costo), 0)
+             FROM inventario_snapshot s JOIN almacenes a ON a.codigo = s.bodega_codigo
+             WHERE a.tipo = 'Venta' AND s.fecha_snapshot >= %s"""
+    s_p = [d30]
+    s_q += multi_filter("a.regional", regionales, s_p)
+    s_q += multi_filter("s.bodega_codigo", almacenes_f, s_p)
+    s_q += obs_filter("s", tipos_ref, s_p)
+    s_q += " GROUP BY s.fecha_snapshot ORDER BY s.fecha_snapshot"
+    cur.execute(s_q, tuple(s_p))
     snapshots = {r[0].isoformat(): safe_float(r[1]) for r in cur.fetchall()}
 
     # Ventas acumuladas desde cada día hasta hoy (para estimar inventario histórico)
@@ -841,28 +1111,30 @@ def get_eficiencia_diaria(params):
 
 def get_top_productos(params):
     limit = int(params.get('limit', 20))
-    regional = params.get('regional')
+    regionales = parse_multi(params.get('regional'))
+    almacenes_f = parse_multi(params.get('almacen'))
+    marcas = parse_multi(params.get('marca'))
+    tipos_ref = parse_multi(params.get('tipo_ref'))
     d30 = date.today() - timedelta(days=30)
 
     conn = get_db()
     cur = conn.cursor()
-    if regional:
-        cur.execute("""
-            SELECT v.referencia, p.nombre, COALESCE(SUM(v.cantidad), 0),
-                   COALESCE(SUM(v.valor_total), 0), COUNT(DISTINCT v.bodega_codigo)
-            FROM ventas v
-            LEFT JOIN productos p ON p.referencia = v.referencia
-            JOIN almacenes a ON a.codigo = v.bodega_codigo
-            WHERE v.fecha >= %s AND a.regional = %s
-            GROUP BY v.referencia, p.nombre ORDER BY 3 DESC LIMIT %s
-        """, (d30, regional, limit))
-    else:
-        cur.execute("""
-            SELECT v.referencia, p.nombre, COALESCE(SUM(v.cantidad), 0),
-                   COALESCE(SUM(v.valor_total), 0), COUNT(DISTINCT v.bodega_codigo)
-            FROM ventas v LEFT JOIN productos p ON p.referencia = v.referencia
-            WHERE v.fecha >= %s GROUP BY v.referencia, p.nombre ORDER BY 3 DESC LIMIT %s
-        """, (d30, limit))
+    q = """SELECT v.referencia, p.nombre, COALESCE(SUM(v.cantidad), 0),
+                  COALESCE(SUM(v.valor_total), 0), COUNT(DISTINCT v.bodega_codigo)
+           FROM ventas v
+           LEFT JOIN productos p ON p.referencia = v.referencia
+           JOIN almacenes a ON a.codigo = v.bodega_codigo
+           WHERE v.fecha >= %s"""
+    tp = [d30]
+    q += multi_filter("a.regional", regionales, tp)
+    q += multi_filter("v.bodega_codigo", almacenes_f, tp)
+    q += multi_filter("p.marca_codigo", marcas, tp)
+    if tipos_ref:
+        q += " AND EXISTS (SELECT 1 FROM inventario_actual _tr WHERE _tr.referencia = v.referencia"
+        q += obs_filter("_tr", tipos_ref, tp) + ")"
+    q += " GROUP BY v.referencia, p.nombre ORDER BY 3 DESC LIMIT %s"
+    tp.append(limit)
+    cur.execute(q, tuple(tp))
 
     rows = cur.fetchall()
     conn.close()
@@ -970,15 +1242,21 @@ def get_producto_detalle(params):
 # REGIONALES
 # ============================================
 
-def get_regionales():
+def get_regionales(params=None):
+    params = params or {}
+    regionales_f = parse_multi(params.get('regional'))
+    tipos_ref = parse_multi(params.get('tipo_ref'))
     conn = get_db()
     cur = conn.cursor()
     d30 = date.today() - timedelta(days=30)
 
-    cur.execute("SELECT COALESCE(SUM(cantidad * valor_costo), 0) FROM inventario_actual")
+    tot_q = "SELECT COALESCE(SUM(cantidad * valor_costo), 0) FROM inventario_actual ia WHERE 1=1"
+    tot_p = []
+    tot_q += obs_filter("ia", tipos_ref, tot_p)
+    cur.execute(tot_q, tuple(tot_p))
     inventario_total = safe_float(cur.fetchone()[0])
 
-    cur.execute("""
+    reg_q = """
         SELECT r.codigo, r.nombre,
                COUNT(DISTINCT a.codigo) FILTER (WHERE a.tipo = 'Venta'),
                COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
@@ -986,9 +1264,12 @@ def get_regionales():
         LEFT JOIN almacenes a ON a.regional = r.codigo
         LEFT JOIN inventario_actual ia ON ia.bodega_codigo = a.codigo
         WHERE r.activo = true
-        GROUP BY r.codigo, r.nombre
-        ORDER BY 4 DESC
-    """)
+    """
+    reg_p = []
+    reg_q += multi_filter("r.codigo", regionales_f, reg_p)
+    reg_q += obs_filter("ia", tipos_ref, reg_p)
+    reg_q += " GROUP BY r.codigo, r.nombre ORDER BY 4 DESC"
+    cur.execute(reg_q, tuple(reg_p))
     regiones = cur.fetchall()
 
     result = []
@@ -1032,13 +1313,17 @@ def get_regionales():
 # ============================================
 
 def get_almacenes_resumen(params):
-    regional = params.get('regional')
+    regionales = parse_multi(params.get('regional'))
+    tipos_ref = parse_multi(params.get('tipo_ref'))
     tipo = params.get('tipo', 'Venta')
     conn = get_db()
     cur = conn.cursor()
     d30 = date.today() - timedelta(days=30)
 
-    cur.execute("SELECT COALESCE(SUM(cantidad * valor_costo), 0) FROM inventario_actual")
+    tot_q = "SELECT COALESCE(SUM(cantidad * valor_costo), 0) FROM inventario_actual ia WHERE 1=1"
+    tot_p = []
+    tot_q += obs_filter("ia", tipos_ref, tot_p)
+    cur.execute(tot_q, tuple(tot_p))
     inventario_total = safe_float(cur.fetchone()[0])
 
     q = """
@@ -1053,8 +1338,8 @@ def get_almacenes_resumen(params):
     p = []
     if tipo:
         q += " AND a.tipo = %s"; p.append(tipo)
-    if regional:
-        q += " AND a.regional = %s"; p.append(regional)
+    q += multi_filter("a.regional", regionales, p)
+    q += obs_filter("ia", tipos_ref, p)
     q += " GROUP BY a.codigo, a.nombre, a.tipo, a.regional, a.es_cedi ORDER BY 8 DESC"
     cur.execute(q, tuple(p))
     almacenes = cur.fetchall()
@@ -1073,7 +1358,8 @@ def get_almacenes_resumen(params):
                    COUNT(*) FILTER (WHERE nivel = 'CRITICO'),
                    COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_CRITICO'),
                    COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_BAJO'),
-                   COUNT(*) FILTER (WHERE tipo_alerta = 'SOBREINVENTARIO')
+                   COUNT(*) FILTER (WHERE tipo_alerta = 'SOBREINVENTARIO'),
+                   COUNT(*) FILTER (WHERE tipo_alerta = 'SIN_ROTACION')
             FROM alertas WHERE bodega_codigo = %s AND estado = 'PENDIENTE'
         """, (cod,))
         ar = cur.fetchone()
@@ -1089,6 +1375,7 @@ def get_almacenes_resumen(params):
             'ventas_30d_unidades': safe_float(vr[0]), 'ventas_30d_valor': ventas_val,
             'alertas_total': ar[0], 'alertas_criticas': ar[1],
             'stock_critico': ar[2], 'stock_bajo': ar[3], 'sobreinventario': ar[4],
+            'sin_rotacion': ar[5],
             'rotacion_pct': round(rotacion, 1)
         })
 
@@ -1102,13 +1389,14 @@ def get_almacenes_resumen(params):
 
 def get_analisis_inventario(params):
     """Desglose de inventario por marca con porcentajes"""
-    regional = params.get('regional')
+    regionales = parse_multi(params.get('regional'))
+    almacenes_f = parse_multi(params.get('almacen'))
+    tipos_ref = parse_multi(params.get('tipo_ref'))
     tipo_almacen = params.get('tipo', 'Venta')
 
     conn = get_db()
     cur = conn.cursor()
 
-    # Total general para calcular porcentajes
     tot_q = """
         SELECT COALESCE(SUM(ia.cantidad), 0), COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
         FROM inventario_actual ia
@@ -1118,8 +1406,9 @@ def get_analisis_inventario(params):
     tot_p = []
     if tipo_almacen:
         tot_q += " AND a.tipo = %s"; tot_p.append(tipo_almacen)
-    if regional:
-        tot_q += " AND a.regional = %s"; tot_p.append(regional)
+    tot_q += multi_filter("a.regional", regionales, tot_p)
+    tot_q += multi_filter("ia.bodega_codigo", almacenes_f, tot_p)
+    tot_q += obs_filter("ia", tipos_ref, tot_p)
     cur.execute(tot_q, tuple(tot_p))
     tr = cur.fetchone()
     total_unidades = safe_float(tr[0])
@@ -1141,8 +1430,9 @@ def get_analisis_inventario(params):
     p = []
     if tipo_almacen:
         q += " AND a.tipo = %s"; p.append(tipo_almacen)
-    if regional:
-        q += " AND a.regional = %s"; p.append(regional)
+    q += multi_filter("a.regional", regionales, p)
+    q += multi_filter("ia.bodega_codigo", almacenes_f, p)
+    q += obs_filter("ia", tipos_ref, p)
     q += """
         GROUP BY m.codigo, m.nombre, m.categoria, m.clasificacion
         ORDER BY valor DESC
@@ -1173,8 +1463,11 @@ def get_analisis_inventario(params):
         WHERE v.fecha >= %s AND v.fecha <= %s
     """
     vp = [fecha_desde, fecha_hasta]
-    if regional:
-        vq += " AND a.regional = %s"; vp.append(regional)
+    vq += multi_filter("a.regional", regionales, vp)
+    vq += multi_filter("v.bodega_codigo", almacenes_f, vp)
+    if tipos_ref:
+        vq += " AND EXISTS (SELECT 1 FROM inventario_actual _tr WHERE _tr.referencia = v.referencia"
+        vq += obs_filter("_tr", tipos_ref, vp) + ")"
     vq += " GROUP BY p.marca_codigo"
     cur.execute(vq, tuple(vp))
     ventas_marca = {r[0]: {'unidades': safe_float(r[1]), 'valor': safe_float(r[2])} for r in cur.fetchall()}
@@ -1206,6 +1499,94 @@ def get_analisis_inventario(params):
         'dias_rango': dias_rango,
         'total_marcas': len(marcas), 'marcas': marcas
     }
+
+
+# ============================================
+# ADMIN: GENERAR ALERTAS SIN_ROTACION
+# ============================================
+
+def generar_alertas_sin_rotacion():
+    d30 = date.today() - timedelta(days=30)
+    d90 = date.today() - timedelta(days=90)
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM alertas WHERE tipo_alerta = 'SIN_ROTACION' AND estado = 'PENDIENTE'")
+    deleted = cur.rowcount
+
+    cur.execute("""
+        INSERT INTO alertas (tipo_alerta, nivel, referencia, bodega_codigo,
+                             stock_actual, dias_inventario, venta_diaria, mensaje)
+        SELECT
+            'SIN_ROTACION',
+            CASE WHEN NOT EXISTS (
+                SELECT 1 FROM ventas v2 WHERE v2.referencia = ia.referencia
+                AND v2.bodega_codigo = ia.bodega_codigo AND v2.fecha >= %s
+            ) THEN 'ALTO' ELSE 'MEDIO' END,
+            ia.referencia,
+            ia.bodega_codigo,
+            ia.cantidad,
+            9999,
+            0,
+            'Sin ventas en 30 días. Stock: ' || ROUND(ia.cantidad, 0) ||
+            ' uds. Valor: $' || ROUND(ia.cantidad * ia.valor_costo, 0) ||
+            '. Evaluar promoción/oferta o redistribución.'
+        FROM inventario_actual ia
+        JOIN almacenes a ON a.codigo = ia.bodega_codigo AND a.tipo = 'Venta'
+        WHERE ia.cantidad > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM ventas v WHERE v.referencia = ia.referencia
+              AND v.bodega_codigo = ia.bodega_codigo AND v.fecha >= %s
+          )
+    """, (d90, d30))
+    inserted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return {'alertas_eliminadas': deleted, 'alertas_generadas': inserted}
+
+
+def get_observaciones_resumen():
+    """Resumen de items por observación"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT COALESCE(ia.observacion, 'SIN_OBSERVACION') as obs,
+               COUNT(*), COALESCE(SUM(ia.cantidad), 0), COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
+        FROM inventario_actual ia
+        JOIN almacenes a ON a.codigo = ia.bodega_codigo AND a.tipo = 'Venta'
+        WHERE ia.cantidad > 0
+        GROUP BY ia.observacion ORDER BY 4 DESC
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    return [{'observacion': r[0], 'items': r[1], 'unidades': safe_float(r[2]), 'valor': safe_float(r[3])} for r in rows]
+
+
+def actualizar_observacion(body, user):
+    """Permite al admin actualizar observacion de items en lote"""
+    denied = require_admin(user)
+    if denied:
+        return denied
+    data = json.loads(body) if isinstance(body, str) else (body or {})
+    items = data.get('items', [])
+    observacion = data.get('observacion', '').strip() or None
+
+    if not items:
+        return api_response(400, {'error': 'Se requiere una lista de items [{referencia, bodega_codigo}]'})
+
+    conn = get_db()
+    cur = conn.cursor()
+    updated = 0
+    for item in items:
+        ref = item.get('referencia')
+        bod = item.get('bodega_codigo')
+        if ref and bod:
+            cur.execute("UPDATE inventario_actual SET observacion = %s WHERE referencia = %s AND bodega_codigo = %s",
+                        (observacion, ref, bod))
+            updated += cur.rowcount
+    conn.commit()
+    conn.close()
+    return api_response(200, {'message': f'{updated} items actualizados', 'observacion': observacion})
 
 
 # ============================================
@@ -1345,7 +1726,29 @@ def handler(event, context):
 
         # Regionales
         if path == '/api/regionales':
-            return api_response(200, get_regionales())
+            return api_response(200, get_regionales(params))
+
+        # Admin: usuarios
+        if path == '/api/admin/usuarios' and method == 'GET':
+            return get_usuarios(user)
+        if path == '/api/admin/usuarios' and method == 'POST':
+            return crear_usuario(body, user)
+        if path.startswith('/api/admin/usuarios/') and method == 'PUT':
+            uid = path.split('/')[4]
+            return actualizar_usuario(uid, body, user)
+        if path.startswith('/api/admin/usuarios/') and method == 'DELETE':
+            uid = path.split('/')[4]
+            return eliminar_usuario(uid, user)
+
+        # Admin: generar alertas SIN_ROTACION
+        if path == '/api/admin/generar-alertas-sin-rotacion' and method == 'POST':
+            return api_response(200, generar_alertas_sin_rotacion())
+
+        # Admin: observaciones de inventario
+        if path == '/api/admin/observaciones' and method == 'GET':
+            return api_response(200, get_observaciones_resumen())
+        if path == '/api/admin/observaciones' and method == 'POST':
+            return actualizar_observacion(body, user)
 
         # Export CSV
         if path.startswith('/api/export/'):

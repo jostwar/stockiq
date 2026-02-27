@@ -350,25 +350,25 @@ def upsert_inventario(conn, inventario: list, fecha_snapshot: str):
     if not inventario:
         return 0
     
-    # Primero actualizar inventario_actual
     query_actual = """
-    INSERT INTO inventario_actual (bodega_codigo, referencia, cantidad, valor_costo, valor_venta)
+    INSERT INTO inventario_actual (bodega_codigo, referencia, cantidad, valor_costo, valor_venta, observacion)
     VALUES %s
     ON CONFLICT (bodega_codigo, referencia) DO UPDATE SET
         cantidad = EXCLUDED.cantidad,
         valor_costo = EXCLUDED.valor_costo,
         valor_venta = EXCLUDED.valor_venta,
+        observacion = EXCLUDED.observacion,
         ultima_actualizacion = CURRENT_TIMESTAMP
     """
     
-    # También guardar snapshot histórico
     query_snapshot = """
-    INSERT INTO inventario_snapshot (fecha_snapshot, bodega_codigo, referencia, cantidad, valor_costo, valor_venta)
+    INSERT INTO inventario_snapshot (fecha_snapshot, bodega_codigo, referencia, cantidad, valor_costo, valor_venta, observacion)
     VALUES %s
     ON CONFLICT (fecha_snapshot, bodega_codigo, referencia) DO UPDATE SET
         cantidad = EXCLUDED.cantidad,
         valor_costo = EXCLUDED.valor_costo,
-        valor_venta = EXCLUDED.valor_venta
+        valor_venta = EXCLUDED.valor_venta,
+        observacion = EXCLUDED.observacion
     """
     
     values_actual = []
@@ -380,9 +380,10 @@ def upsert_inventario(conn, inventario: list, fecha_snapshot: str):
         cantidad = Decimal(str(i.get('CANTIDAD', 0)))
         valor_costo = Decimal(str(i.get('VCOSTO', 0)))
         valor_venta = Decimal(str(i.get('VVENTA', 0)))
+        observacion = (i.get('OBSERV1') or '').strip() or None
         
-        values_actual.append((bodega, referencia, cantidad, valor_costo, valor_venta))
-        values_snapshot.append((fecha_snapshot, bodega, referencia, cantidad, valor_costo, valor_venta))
+        values_actual.append((bodega, referencia, cantidad, valor_costo, valor_venta, observacion))
+        values_snapshot.append((fecha_snapshot, bodega, referencia, cantidad, valor_costo, valor_venta, observacion))
     
     with conn.cursor() as cur:
         execute_values(cur, query_actual, values_actual)
@@ -606,13 +607,9 @@ def handler(event, context):
 # ============================================
 
 if __name__ == "__main__":
-    # Configurar variables de entorno para prueba local
+    from dotenv import load_dotenv
+    load_dotenv()
     os.environ['LOCAL_DEV'] = 'true'
-    os.environ['DB_HOST'] = 'inventory-platform-db.cmal9qmniwdx.us-east-1.rds.amazonaws.com'
-    os.environ['DB_PORT'] = '5432'
-    os.environ['DB_NAME'] = 'inventory_db'
-    os.environ['DB_USER'] = 'inventory_admin'
-    os.environ['DB_PASSWORD'] = 'TU_PASSWORD_AQUI'  # Cambiar
     
     # Probar extracción de ventas
     print("=== Probando extracción de ventas ===")

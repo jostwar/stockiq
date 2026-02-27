@@ -65,11 +65,11 @@ resource "aws_lambda_function" "analytics_engine" {
 # EVENTBRIDGE - PROGRAMACIÓN DIARIA
 # ============================================
 
-# Regla para Data Collector - 6 AM Colombia (11 AM UTC)
+# Regla para Data Collector - cada hora de 6 AM a 10 PM Colombia (11 UTC a 03 UTC+1)
 resource "aws_cloudwatch_event_rule" "data_collector_schedule" {
   name                = "${var.project_name}-data-collector-schedule"
-  description         = "Ejecutar Data Collector diariamente a las 6 AM Colombia"
-  schedule_expression = "cron(0 11 * * ? *)"
+  description         = "Ejecutar Data Collector cada hora (6AM-10PM Colombia)"
+  schedule_expression = "cron(0 11-23,0-3 * * ? *)"
 
   tags = {
     Name        = "${var.project_name}-data-collector-schedule"
@@ -95,11 +95,11 @@ resource "aws_lambda_permission" "allow_eventbridge_data_collector" {
   source_arn    = aws_cloudwatch_event_rule.data_collector_schedule.arn
 }
 
-# Regla para Analytics Engine - 7 AM Colombia (12 PM UTC)
+# Regla para Analytics Engine - cada 4 horas (7AM, 11AM, 3PM, 7PM Colombia)
 resource "aws_cloudwatch_event_rule" "analytics_schedule" {
   name                = "${var.project_name}-analytics-schedule"
-  description         = "Ejecutar Analytics Engine diariamente a las 7 AM Colombia"
-  schedule_expression = "cron(0 12 * * ? *)"
+  description         = "Ejecutar Analytics Engine cada 4 horas (7AM, 11AM, 3PM, 7PM COL)"
+  schedule_expression = "cron(0 12,16,20,0 * * ? *)"
 
   tags = {
     Name        = "${var.project_name}-analytics-schedule"

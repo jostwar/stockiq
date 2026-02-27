@@ -17,27 +17,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # CONFIGURACIÓN - EDITAR ESTOS VALORES
 # ============================================
 
+from dotenv import load_dotenv
+load_dotenv()
+
 DB_CONFIG = {
-    'host': 'inventory-platform-db.cmal9qmniwdx.us-east-1.rds.amazonaws.com',
-    'port': '5432',
-    'name': 'inventory_db',
-    'user': 'inventory_admin',
-    'password': 'Gsp2026*'  # <-- CAMBIAR
+    'host': os.environ.get('DB_HOST', ''),
+    'port': os.environ.get('DB_PORT', '5432'),
+    'name': os.environ.get('DB_NAME', ''),
+    'user': os.environ.get('DB_USER', ''),
+    'password': os.environ.get('DB_PASSWORD', '')
 }
 
-# Fecha inicial de carga
 FECHA_INICIO = '2025-01-01'
 
-# ============================================
-# CONFIGURAR ENTORNO
-# ============================================
-
 os.environ['LOCAL_DEV'] = 'true'
-os.environ['DB_HOST'] = DB_CONFIG['host']
-os.environ['DB_PORT'] = DB_CONFIG['port']
-os.environ['DB_NAME'] = DB_CONFIG['name']
-os.environ['DB_USER'] = DB_CONFIG['user']
-os.environ['DB_PASSWORD'] = DB_CONFIG['password']
 
 from handler import handler_ventas
 

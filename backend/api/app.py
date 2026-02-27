@@ -18,11 +18,11 @@ CORS(app)
 # ============================================
 
 DB_CONFIG = {
-    'host': os.environ.get('DB_HOST', 'inventory-platform-db.cmal9qmniwdx.us-east-1.rds.amazonaws.com'),
+    'host': os.environ.get('DB_HOST', ''),
     'port': os.environ.get('DB_PORT', '5432'),
-    'database': os.environ.get('DB_NAME', 'inventory_db'),
-    'user': os.environ.get('DB_USER', 'inventory_admin'),
-    'password': os.environ.get('DB_PASSWORD', 'Gsp2026*')
+    'database': os.environ.get('DB_NAME', ''),
+    'user': os.environ.get('DB_USER', ''),
+    'password': os.environ.get('DB_PASSWORD', '')
 }
 
 

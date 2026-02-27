@@ -3,12 +3,23 @@
 *.tfstate
 *.tfstate.*
 terraform.tfvars
+.terraform.lock.hcl
 
 # Python
 __pycache__/
 *.pyc
 .env
+.env.*
 venv/
+
+# Lambda packages (dependencies - large and may contain secrets in copied handlers)
+package/
+**/package/
+lambda_api.zip
+*.zip
+
+# Layers
+layers/
 
 # OS
 .DS_Store
@@ -16,4 +27,3 @@ venv/
 # Logs
 *.log
 *.xml
-.terraform.lock.hcl

@@ -336,7 +336,7 @@ def generar_alertas(conn, fecha_calculo: str = None):
     WHERE m.fecha_calculo = %s
       AND m.stock_actual > 0
       AND (m.venta_ultimos_90_dias < %s OR m.rotacion_mensual < %s)
-      AND ma.clasificacion != 'D'  -- Excluir marcas clase D (baja rotación esperada)
+      AND ma.clasificacion != 'D'
     """
     
     with conn.cursor() as cur:
@@ -346,16 +346,101 @@ def generar_alertas(conn, fecha_calculo: str = None):
             UMBRAL_ROTACION_MENSUAL
         ))
         alertas_baja_rotacion = cur.rowcount
+
+    # Generar alertas de SIN ROTACIÓN (stock > 0, sin ventas en 30d)
+    query_sin_rotacion = """
+    INSERT INTO alertas (tipo_alerta, nivel, referencia, bodega_codigo,
+                         stock_actual, dias_inventario, venta_diaria,
+                         marca_categoria, marca_clasificacion, mensaje)
+    SELECT 
+        'SIN_ROTACION' as tipo_alerta,
+        CASE 
+            WHEN m.venta_ultimos_90_dias = 0 THEN 'ALTO'
+            ELSE 'MEDIO'
+        END as nivel,
+        m.referencia,
+        m.bodega_codigo,
+        m.stock_actual,
+        m.dias_inventario,
+        m.venta_diaria_promedio,
+        ma.categoria,
+        ma.clasificacion,
+        'Sin ventas en 30 días. Stock: ' || ROUND(m.stock_actual, 0) ||
+        ' uds. Valor: $' || ROUND(m.valor_stock, 0) ||
+        '. Evaluar promoción/oferta o redistribución.'
+    FROM metricas_producto_almacen m
+    JOIN productos p ON p.referencia = m.referencia
+    LEFT JOIN marcas ma ON ma.codigo = p.marca_codigo
+    JOIN almacenes a ON a.codigo = m.bodega_codigo AND a.tipo = 'Venta'
+    WHERE m.fecha_calculo = %s
+      AND m.stock_actual > 0
+      AND m.venta_diaria_promedio = 0
+      AND NOT EXISTS (
+          SELECT 1 FROM ventas v
+          WHERE v.referencia = m.referencia AND v.bodega_codigo = m.bodega_codigo
+          AND v.fecha >= %s::date - interval '30 days'
+      )
+    """
     
+    with conn.cursor() as cur:
+        cur.execute(query_sin_rotacion, (fecha_calculo, fecha_calculo))
+        alertas_sin_rotacion = cur.rowcount
+
+    # Generar alertas de STOCK AGOTADO: referencias con ventas en un almacen pero sin stock ahi
+    # Caso 1: ia.cantidad = 0 en inventario_actual
+    # Caso 2: la referencia se vendio en un almacen pero ya no existe en inventario_actual para ese almacen
+    query_agotado = """
+    INSERT INTO alertas (tipo_alerta, nivel, referencia, bodega_codigo,
+                         stock_actual, dias_inventario, venta_diaria,
+                         marca_categoria, marca_clasificacion, mensaje)
+    SELECT
+        'STOCK_AGOTADO' as tipo_alerta,
+        CASE
+            WHEN vd.venta_diaria >= 1 THEN 'CRITICO'
+            WHEN vd.venta_diaria >= 0.3 THEN 'ALTO'
+            ELSE 'MEDIO'
+        END as nivel,
+        vd.referencia,
+        vd.bodega_codigo,
+        COALESCE(ia.cantidad, 0),
+        0,
+        vd.venta_diaria,
+        ma.categoria,
+        ma.clasificacion,
+        'Agotado con demanda activa. Venta diaria: ' || ROUND(vd.venta_diaria, 2) ||
+        ' uds (' || vd.venta_30d || ' en 30d). Reabastecer urgente.'
+    FROM (
+        SELECT v.referencia, v.bodega_codigo,
+               SUM(v.cantidad) as venta_30d,
+               SUM(v.cantidad) / 30.0 as venta_diaria
+        FROM ventas v
+        JOIN almacenes a ON a.codigo = v.bodega_codigo AND a.tipo = 'Venta'
+        WHERE v.fecha >= %s::date - interval '30 days'
+        GROUP BY v.referencia, v.bodega_codigo
+        HAVING SUM(v.cantidad) > 0
+    ) vd
+    JOIN productos p ON p.referencia = vd.referencia
+    LEFT JOIN marcas ma ON ma.codigo = p.marca_codigo
+    LEFT JOIN inventario_actual ia ON ia.referencia = vd.referencia AND ia.bodega_codigo = vd.bodega_codigo
+    WHERE COALESCE(ia.cantidad, 0) = 0
+    """
+
+    with conn.cursor() as cur:
+        cur.execute(query_agotado, (fecha_calculo,))
+        alertas_agotado = cur.rowcount
+
     conn.commit()
     
-    total_alertas = alertas_stock_bajo + alertas_sobreinventario + alertas_baja_rotacion
-    logger.info(f"Alertas generadas: {alertas_stock_bajo} stock bajo, {alertas_sobreinventario} sobreinventario, {alertas_baja_rotacion} baja rotación")
+    total_alertas = alertas_stock_bajo + alertas_sobreinventario + alertas_baja_rotacion + alertas_sin_rotacion + alertas_agotado
+    logger.info(f"Alertas generadas: {alertas_stock_bajo} stock bajo, {alertas_sobreinventario} sobreinventario, "
+                f"{alertas_baja_rotacion} baja rotación, {alertas_sin_rotacion} sin rotación, {alertas_agotado} agotado")
     
     return {
         'stock_bajo': alertas_stock_bajo,
         'sobreinventario': alertas_sobreinventario,
         'baja_rotacion': alertas_baja_rotacion,
+        'sin_rotacion': alertas_sin_rotacion,
+        'stock_agotado': alertas_agotado,
         'total': total_alertas
     }
 
@@ -702,12 +787,8 @@ def handler(event, context):
 # ============================================
 
 if __name__ == "__main__":
-    # Configurar variables de entorno para prueba local
-    os.environ['DB_HOST'] = 'inventory-platform-db.cmal9qmniwdx.us-east-1.rds.amazonaws.com'
-    os.environ['DB_PORT'] = '5432'
-    os.environ['DB_NAME'] = 'inventory_db'
-    os.environ['DB_USER'] = 'inventory_admin'
-    os.environ['DB_PASSWORD'] = 'Gsp2026*'
+    import dotenv
+    dotenv.load_dotenv()
 
     print("=" * 60)
     print("MOTOR DE ANÁLISIS - PRUEBA LOCAL")
