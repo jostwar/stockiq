@@ -87,6 +87,9 @@
             <a onclick="showPage('almacenes')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="almacenes">
                 <i data-lucide="warehouse" class="w-4 h-4"></i>Almacenes
             </a>
+            <a onclick="showPage('analisis')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="analisis">
+                <i data-lucide="pie-chart" class="w-4 h-4"></i>Análisis
+            </a>
             <a onclick="showPage('productos')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer text-slate-300" data-page="productos">
                 <i data-lucide="search" class="w-4 h-4"></i>Productos
             </a>
@@ -114,8 +117,11 @@
         <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
             <div class="flex items-center gap-4">
                 <h2 id="page-title" class="text-lg font-semibold text-gray-800">Dashboard</h2>
-                <select id="global-regional" onchange="onRegionalChange()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400">
+                <select id="global-regional" onchange="onFilterChange()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400">
                     <option value="">Todas las regionales</option>
+                </select>
+                <select id="global-marca" onchange="onFilterChange()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400">
+                    <option value="">Todas las marcas</option>
                 </select>
             </div>
             <div class="flex items-center gap-3">
@@ -245,6 +251,31 @@
                 <div id="almacenes-content"></div>
             </div>
 
+            <!-- ===== ANÁLISIS ===== -->
+            <div id="page-analisis" class="page">
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <select id="filtro-analisis-tipo" onchange="loadAnalisis()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+                        <option value="Venta">Almacenes Venta</option>
+                        <option value="Reserva">Reserva</option>
+                        <option value="">Todos los tipos</option>
+                    </select>
+                    <div class="ml-auto flex items-center gap-3">
+                        <button onclick="exportData('almacenes')" class="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
+                            <i data-lucide="download" class="w-3.5 h-3.5"></i>Exportar CSV
+                        </button>
+                    </div>
+                </div>
+                <div id="analisis-resumen" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-4">Distribución de Inventario por Marca</h3>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div style="height:300px;position:relative"><canvas id="chart-marcas-pie"></canvas></div>
+                        <div style="height:300px;position:relative"><canvas id="chart-marcas-bar"></canvas></div>
+                    </div>
+                </div>
+                <div id="analisis-tabla"></div>
+            </div>
+
             <!-- ===== PRODUCTOS ===== -->
             <div id="page-productos" class="page">
                 <div class="mb-4">
@@ -372,7 +403,7 @@ function showPage(page) {
     document.getElementById('page-' + page).classList.add('active');
     document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
     document.querySelector(`.sidebar-item[data-page="${page}"]`).classList.add('active');
-    const titles = { dashboard: 'Dashboard', alertas: 'Alertas', traslados: 'Traslados', compras: 'Compras Sugeridas', almacenes: 'Almacenes', productos: 'Búsqueda de Productos', regionales: 'Regionales' };
+    const titles = { dashboard: 'Dashboard', alertas: 'Alertas', traslados: 'Traslados', compras: 'Compras Sugeridas', almacenes: 'Almacenes', analisis: 'Análisis de Inventario', productos: 'Búsqueda de Productos', regionales: 'Regionales' };
     document.getElementById('page-title').textContent = titles[page] || page;
     refreshCurrentPage();
     lucide.createIcons();
@@ -381,14 +412,16 @@ function showPage(page) {
 function refreshCurrentPage() {
     const loaders = {
         dashboard: loadDashboard, alertas: loadAlertas, traslados: loadTraslados,
-        compras: loadCompras, almacenes: loadAlmacenes, productos: () => {}, regionales: loadRegionales
+        compras: loadCompras, almacenes: loadAlmacenes, productos: () => {},
+        analisis: loadAnalisis, regionales: loadRegionales
     };
     if (loaders[currentPage]) loaders[currentPage]();
     document.getElementById('last-update').textContent = 'Actualizado: ' + new Date().toLocaleTimeString('es-CO');
 }
 
-function onRegionalChange() { refreshCurrentPage(); }
+function onFilterChange() { refreshCurrentPage(); }
 function getRegional() { return document.getElementById('global-regional').value; }
+function getMarca() { return document.getElementById('global-marca').value; }
 
 // ============================================
 // DASHBOARD
@@ -396,9 +429,12 @@ function getRegional() { return document.getElementById('global-regional').value
 async function loadDashboard() {
     try {
         const r = getRegional();
-        const qs = r ? `?regional=${r}` : '';
+        const m = getMarca();
+        let qs = '?';
+        if (r) qs += `regional=${r}&`;
+        if (m) qs += `marca=${m}&`;
         const [kpis, eficiencia, top] = await Promise.all([
-            api('/kpis' + qs), api('/ventas/eficiencia' + qs), api('/ventas/top-productos' + qs + (qs ? '&' : '?') + 'limit=10')
+            api('/kpis' + qs), api('/ventas/eficiencia' + qs), api('/ventas/top-productos' + qs + 'limit=10')
         ]);
         renderKPIs(kpis);
         renderEficienciaChart(eficiencia);
@@ -814,6 +850,120 @@ async function openProductoDetalle(refEncoded) {
 function closeModal() { document.getElementById('modal-producto').classList.add('hidden'); }
 
 // ============================================
+// ANÁLISIS INVENTARIO
+// ============================================
+let pieChart = null, barChart = null;
+
+async function loadAnalisis() {
+    const regional = getRegional();
+    const tipo = document.getElementById('filtro-analisis-tipo').value;
+    let qs = '?';
+    if (regional) qs += `regional=${regional}&`;
+    if (tipo) qs += `tipo=${tipo}&`;
+    try {
+        const data = await api('/analisis/inventario' + qs);
+        renderAnalisis(data);
+    } catch (e) { console.error(e); }
+}
+
+function renderAnalisis(data) {
+    const m = data.marcas || [];
+    // Resumen cards
+    document.getElementById('analisis-resumen').innerHTML = `
+        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+            <p class="text-xs text-gray-500">Valor Total Inventario</p>
+            <p class="text-2xl font-bold text-emerald-600 mt-1">${formatCurrency(data.total_valor)}</p>
+            <p class="text-[11px] text-gray-400">${formatNumber(data.total_unidades)} unidades</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+            <p class="text-xs text-gray-500">Marcas con Stock</p>
+            <p class="text-2xl font-bold text-blue-600 mt-1">${data.total_marcas}</p>
+            <p class="text-[11px] text-gray-400">Top: ${m.length > 0 ? m[0].nombre : '-'} (${m.length > 0 ? m[0].pct_valor.toFixed(1) : 0}%)</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+            <p class="text-xs text-gray-500">Concentración Top 5</p>
+            <p class="text-2xl font-bold text-purple-600 mt-1">${m.slice(0,5).reduce((s,x) => s + x.pct_valor, 0).toFixed(1)}%</p>
+            <p class="text-[11px] text-gray-400">del valor total de inventario</p>
+        </div>`;
+
+    // Charts
+    const top10 = m.slice(0, 10);
+    const others = m.slice(10);
+    const pieLabels = top10.map(x => x.nombre);
+    const pieValues = top10.map(x => x.valor);
+    if (others.length > 0) {
+        pieLabels.push('Otras (' + others.length + ')');
+        pieValues.push(others.reduce((s, x) => s + x.valor, 0));
+    }
+    const colors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#f97316','#84cc16','#6366f1','#94a3b8'];
+
+    if (pieChart) pieChart.destroy();
+    pieChart = new Chart(document.getElementById('chart-marcas-pie'), {
+        type: 'doughnut',
+        data: { labels: pieLabels, datasets: [{ data: pieValues, backgroundColor: colors }] },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12, padding: 8 } },
+                tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatCurrency(ctx.raw)} (${(ctx.raw/data.total_valor*100).toFixed(1)}%)` } } }
+        }
+    });
+
+    if (barChart) barChart.destroy();
+    barChart = new Chart(document.getElementById('chart-marcas-bar'), {
+        type: 'bar',
+        data: {
+            labels: top10.map(x => x.nombre),
+            datasets: [
+                { label: 'Inventario', data: top10.map(x => x.valor), backgroundColor: 'rgba(59,130,246,.6)', borderRadius: 4 },
+                { label: 'Venta 30d', data: top10.map(x => x.venta_30d_valor), backgroundColor: 'rgba(16,185,129,.6)', borderRadius: 4 }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+            plugins: { legend: { position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } } },
+            scales: { x: { ticks: { callback: v => formatCurrency(v), font: { size: 9 } }, grid: { color: '#f3f4f6' } }, y: { ticks: { font: { size: 10 } } } }
+        }
+    });
+
+    // Tabla detallada
+    document.getElementById('analisis-tabla').innerHTML = `
+        <div class="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead><tr class="border-b border-gray-200 bg-gray-50">
+                    <th class="text-left py-2.5 px-3 font-medium text-gray-600">Marca</th>
+                    <th class="text-center py-2.5 px-3 font-medium text-gray-600">Cat.</th>
+                    <th class="text-center py-2.5 px-3 font-medium text-gray-600">Clas.</th>
+                    <th class="text-right py-2.5 px-3 font-medium text-gray-600">Productos</th>
+                    <th class="text-right py-2.5 px-3 font-medium text-gray-600">Unidades</th>
+                    <th class="text-right py-2.5 px-3 font-medium text-gray-600">Valor Inv.</th>
+                    <th class="text-right py-2.5 px-3 font-medium text-gray-600">% Inv.</th>
+                    <th class="text-right py-2.5 px-3 font-medium text-gray-600">Venta 30d</th>
+                    <th class="text-right py-2.5 px-3 font-medium text-gray-600">Rotación</th>
+                </tr></thead>
+                <tbody>${m.map(x => `
+                    <tr class="border-b border-gray-50 hover:bg-gray-50">
+                        <td class="py-2 px-3 font-medium text-gray-900">${x.nombre || 'Sin marca'}</td>
+                        <td class="py-2 px-3 text-center"><span class="px-1.5 py-0.5 rounded text-[10px] ${x.categoria === 'PRINCIPAL' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}">${x.categoria || '-'}</span></td>
+                        <td class="py-2 px-3 text-center font-bold ${x.clasificacion === 'A' ? 'text-green-600' : x.clasificacion === 'B' ? 'text-blue-600' : x.clasificacion === 'C' ? 'text-yellow-600' : 'text-gray-400'}">${x.clasificacion || '-'}</td>
+                        <td class="py-2 px-3 text-right">${x.productos}</td>
+                        <td class="py-2 px-3 text-right">${formatNumber(x.unidades)}</td>
+                        <td class="py-2 px-3 text-right font-medium">${formatCurrency(x.valor)}</td>
+                        <td class="py-2 px-3 text-right">
+                            <div class="flex items-center justify-end gap-1">
+                                <div class="w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-blue-500 rounded-full" style="width:${Math.min(x.pct_valor, 100)}%"></div></div>
+                                <span class="font-semibold w-10 text-right">${x.pct_valor.toFixed(1)}%</span>
+                            </div>
+                        </td>
+                        <td class="py-2 px-3 text-right">${formatCurrency(x.venta_30d_valor)}</td>
+                        <td class="py-2 px-3 text-right"><span class="font-semibold ${x.rotacion_pct > 30 ? 'text-green-600' : x.rotacion_pct > 15 ? 'text-yellow-600' : 'text-red-600'}">${x.rotacion_pct.toFixed(1)}%</span></td>
+                    </tr>
+                `).join('')}</tbody>
+            </table>
+        </div>`;
+    lucide.createIcons();
+}
+
+// ============================================
 // REGIONALES
 // ============================================
 async function loadRegionales() {
@@ -895,9 +1045,10 @@ async function initApp() {
         const sel = document.getElementById('global-regional');
         sel.innerHTML = '<option value="">Todas las regionales</option>' +
             filtros.regionales.map(r => `<option value="${r.codigo}">${r.nombre}</option>`).join('');
-        const marcaSel = document.getElementById('filtro-compra-marca');
-        marcaSel.innerHTML = '<option value="">Todas las marcas</option>' +
-            filtros.marcas.filter(m => m.categoria === 'PRINCIPAL').map(m => `<option value="${m.codigo}">${m.nombre} (${m.clasificacion})</option>`).join('');
+        const allMarcasHtml = filtros.marcas.map(m => `<option value="${m.codigo}">${m.nombre} (${m.categoria} ${m.clasificacion})</option>`).join('');
+        document.getElementById('global-marca').innerHTML = '<option value="">Todas las marcas</option>' + allMarcasHtml;
+        const principalHtml = filtros.marcas.filter(m => m.categoria === 'PRINCIPAL').map(m => `<option value="${m.codigo}">${m.nombre} (${m.clasificacion})</option>`).join('');
+        document.getElementById('filtro-compra-marca').innerHTML = '<option value="">Todas las marcas</option>' + principalHtml;
     } catch (e) { console.error('Error cargando filtros:', e); }
     loadDashboard();
     setInterval(() => { if (currentPage === 'dashboard') loadDashboard(); }, 120000);
