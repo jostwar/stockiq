@@ -268,7 +268,33 @@ def get_kpis(params):
     # Compras pendientes
     cur.execute("SELECT COUNT(*), COALESCE(SUM(valor_compra_estimado), 0) FROM recomendaciones_compra WHERE estado = 'PENDIENTE'")
     r = cur.fetchone()
-    compras = {'total': r[0], 'valor_estimado': safe_float(r[1])}
+    if r[0] > 0:
+        compras = {'total': r[0], 'valor_estimado': safe_float(r[1])}
+    else:
+        cur.execute("""
+            WITH venta_red AS (
+                SELECT v.referencia, SUM(v.cantidad)/30.0 as vd
+                FROM ventas v JOIN almacenes a ON a.codigo=v.bodega_codigo AND a.tipo='Venta'
+                WHERE v.fecha >= %s GROUP BY v.referencia HAVING SUM(v.cantidad)>0
+            ), stock_red AS (
+                SELECT referencia, SUM(cantidad) as st FROM inventario_actual GROUP BY referencia
+            ), costo_ref AS (
+                SELECT referencia, AVG(NULLIF(valor_costo,0)) as cp FROM inventario_actual WHERE valor_costo>0 GROUP BY referencia
+            ), costo_venta AS (
+                SELECT referencia, ROUND(SUM(valor_total)/NULLIF(SUM(cantidad),0)) as ca
+                FROM ventas WHERE fecha >= %s AND cantidad>0 GROUP BY referencia
+            )
+            SELECT COUNT(*), COALESCE(SUM(
+                GREATEST(CEIL((30+15)*vr.vd - COALESCE(sr.st,0)),0) * COALESCE(cr.cp, cv.ca, 0)
+            ),0)
+            FROM venta_red vr
+            LEFT JOIN stock_red sr ON sr.referencia=vr.referencia
+            LEFT JOIN costo_ref cr ON cr.referencia=vr.referencia
+            LEFT JOIN costo_venta cv ON cv.referencia=vr.referencia
+            WHERE COALESCE(sr.st,0) < (30+15)*vr.vd
+        """, (d30, d30))
+        cr = cur.fetchone()
+        compras = {'total': cr[0], 'valor_estimado': safe_float(cr[1])}
 
     # Salud del inventario: desglose por tipo con valor y % sobre total
     salud_join = """
