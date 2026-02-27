@@ -678,9 +678,9 @@ function renderSaludCards(s) {
 
 function renderEficienciaChart(resp) {
     const data = resp.datos || [];
-    const invTotal = resp.valor_inventario_actual || 0;
     const ventaTotal = data.reduce((s, d) => s + d.venta, 0);
-    const pctTotal = invTotal > 0 ? (ventaTotal / invTotal * 100).toFixed(1) : '0';
+    const invPromedio = data.length > 0 ? data.reduce((s, d) => s + d.inventario, 0) / data.length : 0;
+    const pctTotal = invPromedio > 0 ? (ventaTotal / invPromedio * 100).toFixed(1) : '0';
     document.getElementById('eficiencia-total').textContent = `${pctTotal}% eficiencia 30d`;
 
     const ctx = document.getElementById('chart-ventas');

@@ -756,14 +756,14 @@ def get_ventas_diarias(params):
 
 
 def get_eficiencia_diaria(params):
-    """Ventas diarias vs valor inventario para gráfica de eficiencia"""
+    """Ventas diarias vs valor inventario estimado de cada fecha"""
     regional = params.get('regional')
     d30 = date.today() - timedelta(days=30)
 
     conn = get_db()
     cur = conn.cursor()
 
-    # Valor inventario actual (denominador constante)
+    # Inventario actual (hoy)
     if regional:
         cur.execute("""
             SELECT COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
@@ -773,9 +773,9 @@ def get_eficiencia_diaria(params):
         """, (regional,))
     else:
         cur.execute("SELECT COALESCE(SUM(cantidad * valor_costo), 0) FROM inventario_actual")
-    valor_inventario = safe_float(cur.fetchone()[0])
+    valor_inventario_hoy = safe_float(cur.fetchone()[0])
 
-    # Ventas diarias
+    # Ventas diarias (valor)
     if regional:
         cur.execute("""
             SELECT v.fecha, COALESCE(SUM(v.valor_total), 0)
@@ -788,10 +788,9 @@ def get_eficiencia_diaria(params):
             SELECT fecha, COALESCE(SUM(valor_total), 0)
             FROM ventas WHERE fecha >= %s GROUP BY fecha ORDER BY fecha
         """, (d30,))
-
     rows = cur.fetchall()
 
-    # Snapshots de inventario (si existen, para valor histórico real)
+    # Snapshots reales (prioridad si existen)
     if regional:
         cur.execute("""
             SELECT s.fecha_snapshot, COALESCE(SUM(s.cantidad * s.valor_costo), 0)
@@ -808,20 +807,36 @@ def get_eficiencia_diaria(params):
         """, (d30,))
     snapshots = {r[0].isoformat(): safe_float(r[1]) for r in cur.fetchall()}
 
+    # Ventas acumuladas desde cada día hasta hoy (para estimar inventario histórico)
+    # inv_estimado(fecha) = inv_hoy + sum(ventas desde fecha+1 hasta hoy)
+    ventas_por_fecha = {r[0].isoformat(): safe_float(r[1]) for r in rows}
+    fechas_ord = sorted(ventas_por_fecha.keys())
+
+    # Calcular ventas acumuladas inversas (desde cada fecha hacia adelante)
+    ventas_acum_despues = {}
+    acum = 0
+    for f in reversed(fechas_ord):
+        ventas_acum_despues[f] = acum
+        acum += ventas_por_fecha[f]
+
     conn.close()
 
     result = []
     for r in rows:
         fecha_str = r[0].isoformat()
         venta = safe_float(r[1])
-        inv = snapshots.get(fecha_str, valor_inventario)
+        # Prioridad: snapshot real > estimado
+        if fecha_str in snapshots:
+            inv = snapshots[fecha_str]
+        else:
+            inv = valor_inventario_hoy + ventas_acum_despues.get(fecha_str, 0)
         eficiencia = round((venta / inv * 100), 4) if inv > 0 else 0
         result.append({
             'fecha': fecha_str, 'venta': venta, 'inventario': inv,
             'eficiencia': eficiencia
         })
 
-    return {'datos': result, 'valor_inventario_actual': valor_inventario}
+    return {'datos': result, 'valor_inventario_actual': valor_inventario_hoy}
 
 
 def get_top_productos(params):
