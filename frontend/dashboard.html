@@ -251,6 +251,7 @@
                         </button>
                     </div>
                 </div>
+                <div id="compras-kpis" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4"></div>
                 <div id="compras-content"></div>
             </div>
 
@@ -887,6 +888,70 @@ async function loadCompras() {
 
 function renderCompras(data) {
     const el = document.getElementById('compras-content');
+    const kpiEl = document.getElementById('compras-kpis');
+
+    // KPIs resumen
+    const totalValor = data.reduce((s, c) => s + c.valor_compra_estimado, 0);
+    const totalUnidades = data.reduce((s, c) => s + c.cantidad_sugerida, 0);
+    const marcasSet = new Set(data.map(c => c.marca_nombre).filter(Boolean));
+    // Venta perdida: para items con cobertura < lead time (15d default), estimamos
+    // la venta diaria que se pierde por no tener stock suficiente
+    const ventaPerdida = data.reduce((s, c) => {
+        if (c.dias_cobertura_actual <= 0 && c.costo_unitario_estimado > 0) {
+            const ventaDiaria = c.venta_proyectada / 30;
+            return s + (ventaDiaria * c.costo_unitario_estimado * 30);
+        }
+        if (c.dias_cobertura_actual < 15 && c.costo_unitario_estimado > 0) {
+            const ventaDiaria = c.venta_proyectada / 30;
+            const diasSinStock = 15 - c.dias_cobertura_actual;
+            return s + (ventaDiaria * diasSinStock * c.costo_unitario_estimado);
+        }
+        return s;
+    }, 0);
+
+    kpiEl.innerHTML = `
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 rounded-lg bg-blue-50"><i data-lucide="shopping-cart" class="w-4 h-4 text-blue-600"></i></div>
+                <div>
+                    <p class="text-[10px] text-gray-500 font-medium">Valor Total Compra</p>
+                    <p class="text-lg font-bold text-blue-600">${formatCurrency(totalValor)}</p>
+                    <p class="text-[10px] text-gray-400">${data.length} productos</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 rounded-lg bg-red-50"><i data-lucide="trending-down" class="w-4 h-4 text-red-600"></i></div>
+                <div>
+                    <p class="text-[10px] text-gray-500 font-medium">Venta Perdida Estimada</p>
+                    <p class="text-lg font-bold text-red-600">${formatCurrency(ventaPerdida)}</p>
+                    <p class="text-[10px] text-gray-400">si no reabastecemos a tiempo</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 rounded-lg bg-emerald-50"><i data-lucide="package" class="w-4 h-4 text-emerald-600"></i></div>
+                <div>
+                    <p class="text-[10px] text-gray-500 font-medium">Unidades a Comprar</p>
+                    <p class="text-lg font-bold text-emerald-600">${formatNumber(totalUnidades)}</p>
+                    <p class="text-[10px] text-gray-400">${data.length} referencias</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 rounded-lg bg-purple-50"><i data-lucide="building-2" class="w-4 h-4 text-purple-600"></i></div>
+                <div>
+                    <p class="text-[10px] text-gray-500 font-medium">Proveedores / Marcas</p>
+                    <p class="text-lg font-bold text-purple-600">${marcasSet.size}</p>
+                    <p class="text-[10px] text-gray-400">${[...marcasSet].slice(0, 3).join(', ')}${marcasSet.size > 3 ? '...' : ''}</p>
+                </div>
+            </div>
+        </div>`;
+    lucide.createIcons();
+
     if (!data.length) { el.innerHTML = '<p class="text-center text-gray-400 py-12">No hay recomendaciones de compra</p>'; return; }
     el.innerHTML = `
         <div class="bg-white rounded-xl border border-gray-100 overflow-x-auto">
