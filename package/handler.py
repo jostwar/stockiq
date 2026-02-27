@@ -1008,6 +1008,71 @@ def get_regionales():
 
 
 # ============================================
+# ALMACENES RESUMEN (tarjetas tipo regionales)
+# ============================================
+
+def get_almacenes_resumen(params):
+    regional = params.get('regional')
+    tipo = params.get('tipo', 'Venta')
+    conn = get_db()
+    cur = conn.cursor()
+    d30 = date.today() - timedelta(days=30)
+
+    q = """
+        SELECT a.codigo, a.nombre, a.tipo, a.regional, a.es_cedi,
+               COUNT(DISTINCT ia.referencia),
+               COALESCE(SUM(ia.cantidad), 0),
+               COALESCE(SUM(ia.cantidad * ia.valor_costo), 0)
+        FROM almacenes a
+        LEFT JOIN inventario_actual ia ON ia.bodega_codigo = a.codigo
+        WHERE a.activo = true
+    """
+    p = []
+    if tipo:
+        q += " AND a.tipo = %s"; p.append(tipo)
+    if regional:
+        q += " AND a.regional = %s"; p.append(regional)
+    q += " GROUP BY a.codigo, a.nombre, a.tipo, a.regional, a.es_cedi ORDER BY 8 DESC"
+    cur.execute(q, tuple(p))
+    almacenes = cur.fetchall()
+
+    result = []
+    for a in almacenes:
+        cod = a[0]
+        cur.execute("""
+            SELECT COALESCE(SUM(v.cantidad), 0), COALESCE(SUM(v.valor_total), 0)
+            FROM ventas v WHERE v.bodega_codigo = %s AND v.fecha >= %s
+        """, (cod, d30))
+        vr = cur.fetchone()
+
+        cur.execute("""
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE nivel = 'CRITICO'),
+                   COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_CRITICO'),
+                   COUNT(*) FILTER (WHERE tipo_alerta = 'STOCK_BAJO'),
+                   COUNT(*) FILTER (WHERE tipo_alerta = 'SOBREINVENTARIO')
+            FROM alertas WHERE bodega_codigo = %s AND estado = 'PENDIENTE'
+        """, (cod,))
+        ar = cur.fetchone()
+
+        valor_inv = safe_float(a[7])
+        ventas_val = safe_float(vr[1])
+        rotacion = (ventas_val / valor_inv * 100) if valor_inv > 0 else 0
+
+        result.append({
+            'codigo': cod, 'nombre': a[1], 'tipo': a[2], 'regional': a[3], 'es_cedi': a[4],
+            'productos': a[5], 'unidades': safe_float(a[6]), 'valor_inventario': valor_inv,
+            'ventas_30d_unidades': safe_float(vr[0]), 'ventas_30d_valor': ventas_val,
+            'alertas_total': ar[0], 'alertas_criticas': ar[1],
+            'stock_critico': ar[2], 'stock_bajo': ar[3], 'sobreinventario': ar[4],
+            'rotacion_pct': round(rotacion, 1)
+        })
+
+    conn.close()
+    return result
+
+
+# ============================================
 # ANÁLISIS DE INVENTARIO
 # ============================================
 
@@ -1215,6 +1280,8 @@ def handler(event, context):
         # Almacenes
         if path == '/api/almacenes':
             return api_response(200, get_almacenes(params))
+        if path == '/api/almacenes/resumen':
+            return api_response(200, get_almacenes_resumen(params))
 
         # Ventas
         if path == '/api/ventas/diarias':

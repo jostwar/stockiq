@@ -120,6 +120,9 @@
                 <select id="global-regional" onchange="onFilterChange()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400">
                     <option value="">Todas las regionales</option>
                 </select>
+                <select id="global-almacen" onchange="onFilterChange()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400">
+                    <option value="">Todos los almacenes</option>
+                </select>
                 <select id="global-marca" onchange="onFilterChange()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:border-blue-400">
                     <option value="">Todas las marcas</option>
                 </select>
@@ -236,6 +239,10 @@
             <!-- ===== ALMACENES ===== -->
             <div id="page-almacenes" class="page">
                 <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <div class="flex bg-gray-100 rounded-lg p-0.5">
+                        <button onclick="switchAlmacenesView('cards')" id="btn-alm-cards" class="px-3 py-1.5 text-xs font-medium rounded-md bg-white shadow-sm text-gray-800">Tarjetas</button>
+                        <button onclick="switchAlmacenesView('table')" id="btn-alm-table" class="px-3 py-1.5 text-xs font-medium rounded-md text-gray-500">Tabla</button>
+                    </div>
                     <select id="filtro-almacen-tipo" onchange="loadAlmacenes()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
                         <option value="Venta">Venta</option>
                         <option value="Reserva">Reserva</option>
@@ -249,7 +256,8 @@
                         </button>
                     </div>
                 </div>
-                <div id="almacenes-content"></div>
+                <div id="almacenes-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                <div id="almacenes-content" class="hidden"></div>
             </div>
 
             <!-- ===== ANÁLISIS ===== -->
@@ -420,9 +428,24 @@ function refreshCurrentPage() {
     document.getElementById('last-update').textContent = 'Actualizado: ' + new Date().toLocaleTimeString('es-CO');
 }
 
-function onFilterChange() { refreshCurrentPage(); }
+function onFilterChange() {
+    const src = event ? event.target : null;
+    if (src && src.id === 'global-regional') updateAlmacenDropdown();
+    refreshCurrentPage();
+}
 function getRegional() { return document.getElementById('global-regional').value; }
+function getAlmacen() { return document.getElementById('global-almacen').value; }
 function getMarca() { return document.getElementById('global-marca').value; }
+
+function updateAlmacenDropdown() {
+    const regional = getRegional();
+    const sel = document.getElementById('global-almacen');
+    const filtered = regional
+        ? filtros.almacenes.filter(a => a.regional === regional)
+        : filtros.almacenes;
+    sel.innerHTML = '<option value="">Todos los almacenes</option>' +
+        filtered.map(a => `<option value="${a.codigo}">${a.nombre}</option>`).join('');
+}
 
 // ============================================
 // DASHBOARD
@@ -788,13 +811,64 @@ function renderCompras(data) {
 // ============================================
 // ALMACENES
 // ============================================
+let almacenesView = 'cards';
+
+function switchAlmacenesView(view) {
+    almacenesView = view;
+    document.getElementById('btn-alm-cards').className = `px-3 py-1.5 text-xs font-medium rounded-md ${view === 'cards' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`;
+    document.getElementById('btn-alm-table').className = `px-3 py-1.5 text-xs font-medium rounded-md ${view === 'table' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`;
+    document.getElementById('almacenes-cards').className = view === 'cards' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' : 'hidden';
+    document.getElementById('almacenes-content').className = view === 'table' ? '' : 'hidden';
+    loadAlmacenes();
+}
+
 async function loadAlmacenes() {
     const tipo = document.getElementById('filtro-almacen-tipo').value;
     const regional = getRegional();
     let qs = '?';
     if (tipo) qs += `tipo=${tipo}&`;
     if (regional) qs += `regional=${regional}&`;
-    try { renderAlmacenes(await api('/almacenes' + qs)); } catch (e) { console.error(e); }
+    try {
+        if (almacenesView === 'cards') {
+            renderAlmacenesCards(await api('/almacenes/resumen' + qs));
+        } else {
+            renderAlmacenes(await api('/almacenes' + qs));
+        }
+    } catch (e) { console.error(e); }
+}
+
+function renderAlmacenesCards(data) {
+    const el = document.getElementById('almacenes-cards');
+    if (!data.length) { el.innerHTML = '<p class="text-gray-400 text-center py-12 col-span-3">Sin almacenes con estos filtros</p>'; return; }
+    const colors = ['from-blue-500 to-blue-700','from-emerald-500 to-emerald-700','from-purple-500 to-purple-700','from-orange-500 to-orange-700','from-pink-500 to-pink-700','from-cyan-500 to-cyan-700','from-indigo-500 to-indigo-700','from-teal-500 to-teal-700'];
+    el.innerHTML = data.map((a, i) => `
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="bg-gradient-to-r ${colors[i % colors.length]} px-5 py-3">
+                <h3 class="text-white font-bold text-sm">${a.nombre}</h3>
+                <p class="text-white/70 text-[10px]">${a.regional || '-'} · ${a.tipo}${a.es_cedi ? ' · CEDI' : ''}</p>
+            </div>
+            <div class="p-4 space-y-2.5">
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Valor Inventario</span><span class="text-sm font-semibold">${formatCurrency(a.valor_inventario)}</span></div>
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Productos / Unidades</span><span class="text-sm font-semibold">${formatNumber(a.productos)} / ${formatNumber(a.unidades)}</span></div>
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Ventas 30 días</span><span class="text-sm font-semibold text-blue-600">${formatCurrency(a.ventas_30d_valor)}</span></div>
+                <div class="flex justify-between"><span class="text-xs text-gray-500">Alertas</span>
+                    <span class="text-sm font-semibold ${a.alertas_criticas > 0 ? 'text-red-600' : ''}">${a.alertas_total}
+                        <span class="text-[10px] font-normal text-gray-400">(${a.stock_critico} crít · ${a.stock_bajo} bajo · ${a.sobreinventario} sobre)</span>
+                    </span>
+                </div>
+                ${a.valor_inventario > 0 ? `
+                <div class="pt-2 border-t border-gray-100">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs text-gray-500">Rotación 30d</span>
+                        <span class="text-sm font-bold ${a.rotacion_pct > 30 ? 'text-green-600' : a.rotacion_pct > 15 ? 'text-yellow-600' : 'text-red-600'}">${a.rotacion_pct}%</span>
+                    </div>
+                    <div class="mt-1 w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div class="h-full rounded-full ${a.rotacion_pct > 30 ? 'bg-green-500' : a.rotacion_pct > 15 ? 'bg-yellow-500' : 'bg-red-500'}" style="width:${Math.min(a.rotacion_pct, 100)}%"></div>
+                    </div>
+                </div>` : ''}
+            </div>
+        </div>
+    `).join('');
 }
 
 function renderAlmacenes(data) {
@@ -1117,6 +1191,8 @@ async function initApp() {
         const sel = document.getElementById('global-regional');
         sel.innerHTML = '<option value="">Todas las regionales</option>' +
             filtros.regionales.map(r => `<option value="${r.codigo}">${r.nombre}</option>`).join('');
+        document.getElementById('global-almacen').innerHTML = '<option value="">Todos los almacenes</option>' +
+            filtros.almacenes.map(a => `<option value="${a.codigo}">${a.nombre}</option>`).join('');
         const allMarcasHtml = filtros.marcas.map(m => `<option value="${m.codigo}">${m.nombre} (${m.categoria} ${m.clasificacion})</option>`).join('');
         document.getElementById('global-marca').innerHTML = '<option value="">Todas las marcas</option>' + allMarcasHtml;
         const principalHtml = filtros.marcas.filter(m => m.categoria === 'PRINCIPAL').map(m => `<option value="${m.codigo}">${m.nombre} (${m.clasificacion})</option>`).join('');
